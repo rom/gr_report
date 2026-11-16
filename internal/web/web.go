@@ -98,6 +98,10 @@ type Server struct {
 	// sent while it is on. The groups are told, per conversation and per
 	// message.
 	ChatOversight bool
+	// ChatOversightToggle lets the exercise leaders switch oversight on and
+	// off in the user interface. ChatOversight is then only the state
+	// until someone uses the switch; the choice is stored in the database.
+	ChatOversightToggle bool
 
 	chatLimit chatLimiter
 	pages     map[string]*template.Template
@@ -494,6 +498,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /chat/{peer}", s.authed(s.chatEnabled(s.chat), group, leader))
 	mux.HandleFunc("POST /chat/{peer}", s.authed(s.chatEnabled(s.chatSend), group, leader))
 	mux.HandleFunc("GET /api/chat/{peer}", s.authed(s.chatEnabled(s.chatPoll), group, leader))
+	mux.HandleFunc("POST /chat/oversight", s.authed(s.chatEnabled(s.chatOversightSet), leader))
 	mux.HandleFunc("GET /chat/oversight/{a}/{b}", s.authed(s.chatEnabled(s.chatOversight), leader))
 	mux.HandleFunc("GET /api/chat/oversight/{a}/{b}", s.authed(s.chatEnabled(s.chatOversightPoll), leader))
 

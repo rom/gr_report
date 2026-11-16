@@ -120,6 +120,13 @@ CREATE TABLE chat_read (
 ) STRICT;
 `, `
 ALTER TABLE chat_messages ADD COLUMN overseen INTEGER NOT NULL DEFAULT 0;
+`, `
+CREATE TABLE settings (
+	key        TEXT PRIMARY KEY,
+	value      TEXT NOT NULL,
+	updated_by TEXT NOT NULL,
+	updated_at INTEGER NOT NULL
+) STRICT;
 `}
 
 // Store is safe for concurrent use.
@@ -763,4 +770,38 @@ func (s *Store) ChatOverseen() []OverseenConv {
 	}
 	must(rows.Err())
 	return out
+}
+
+// ---- settings changed at run time ----
+
+// Setting is a value that is changed in the user interface rather than in
+// the configuration file, with who changed it and when.
+type Setting struct {
+	Value     string
+	UpdatedBy string // username
+	UpdatedAt time.Time
+}
+
+// Setting returns a stored setting.
+func (s *Store) Setting(key string) (Setting, bool) {
+	db, err := s.conn()
+	must(err)
+	var v Setting
+	var at int64
+	err = db.QueryRow("SELECT value, updated_by, updated_at FROM settings WHERE key = ?", key).Scan(&v.Value, &v.UpdatedBy, &at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Setting{}, false
+	}
+	must(err)
+	v.UpdatedAt = fromUnix(at)
+	return v, true
+}
+
+// PutSetting stores a setting.
+func (s *Store) PutSetting(key string, v Setting) error {
+	if key == "" {
+		return errors.New("invalid setting")
+	}
+	return s.exec(`INSERT OR REPLACE INTO settings (key, value, updated_by, updated_at) VALUES (?,?,?,?)`,
+		key, v.Value, v.UpdatedBy, unix(v.UpdatedAt))
 }

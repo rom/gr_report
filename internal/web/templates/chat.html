@@ -10,8 +10,20 @@
       {{if .Unread}}<span class="count"><span class="badge">{{.Unread}}</span><span class="sr-only"> {{$.T "unread messages"}}</span></span>{{end}}</a></li>
   {{end}}
   </ul>
-  {{if $v.Overseen}}
+  {{if $v.Switch}}
   <h3 id="h-oversight">{{$.T "Oversight of group conversations"}}</h3>
+  <p><span class="tag {{if $v.Switch.On}}new{{else}}filed{{end}}">{{if $v.Switch.On}}{{$.T "Oversight is on"}}{{else}}{{$.T "Oversight is off"}}{{end}}</span></p>
+  <p class="help">{{if $v.Switch.On}}{{$.T "You can read what groups write to each other from the moment oversight was switched on. They see a notice and a mark on each such message."}}{{else}}{{$.T "Conversations between groups are private. If you switch oversight on, the groups are told and you can read what they write to each other from then on, never earlier messages."}}{{end}}</p>
+  {{if $v.Switch.Info}}<p class="help">{{$v.Switch.Info}}</p>{{end}}
+  {{if $v.Switch.CanToggle}}
+  <form method="post" action="/chat/oversight">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    {{if $v.Switch.On}}<button class="plain" name="oversight" value="off">{{$.T "Switch oversight off"}}</button>
+    {{else}}<button class="plain" name="oversight" value="on">{{$.T "Switch oversight on"}}</button>{{end}}
+  </form>
+  {{end}}
+  {{end}}
+  {{if $v.Overseen}}
   <ul class="queues" aria-labelledby="h-oversight">
   {{range $v.Overseen}}
     <li><a href="{{.URL}}"{{if .Active}} class="active" aria-current="true"{{end}}><span>{{.Name}}</span>
@@ -22,8 +34,13 @@
 </nav>
 <section aria-labelledby="h-conv">
   <h2 id="h-conv">{{$v.Peer.Name}}</h2>
+  {{if $v.OversightApplies}}
+  <p class="help" data-oversight="off"{{if $v.OversightOn}} hidden{{end}}>{{$v.Privacy}}</p>
+  <p class="help" data-oversight="on"{{if not $v.OversightOn}} hidden{{end}}>{{$v.PrivacyOverseen}}</p>
+  <p class="notice" id="oversight-notice" role="status" data-oversight="on"{{if not $v.OversightOn}} hidden{{end}}><strong>{{$v.Oversight}}</strong></p>
+  {{else}}
   <p class="help">{{$v.Privacy}}</p>
-  {{if $v.Oversight}}<p class="notice" id="oversight-notice"><strong>{{$v.Oversight}}</strong></p>{{end}}
+  {{end}}
   {{if $v.EarlierURL}}<p><a href="{{$v.EarlierURL}}">{{$.T "Show earlier messages"}}</a></p>{{end}}
   {{if $v.Older}}<p><a href="{{$v.BaseURL}}">{{$.T "Show the latest messages"}}</a></p>{{end}}
   <div class="panel chat-box" tabindex="0" role="group" aria-label="{{$.T "Messages"}}">
@@ -36,8 +53,9 @@
   </div>
   <template id="chat-line"><li class="chat-line"><p class="chat-meta"><strong class="chat-sender"></strong> <time></time>{{if not $v.ReadOnly}} <span class="tag chat-overseen" hidden>{{$.T "visible to the exercise leader"}}</span>{{end}}</p><p class="body"></p></li></template>
   {{if not $v.ReadOnly}}
-  <form class="panel" id="send" method="post" action="/chat/{{$v.Peer.ID}}"{{if or .Error $v.Oversight}} aria-describedby="{{if .Error}}error {{end}}{{if $v.Oversight}}oversight-notice{{end}}"{{end}}>
+  <form class="panel" id="send" method="post" action="/chat/{{$v.Peer.ID}}"{{if or .Error $v.OversightApplies}} aria-describedby="{{if .Error}}error {{end}}{{if $v.OversightApplies}}oversight-notice{{end}}"{{end}}>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
+    {{if $v.OversightApplies}}<input type="hidden" name="oversight_seen" id="oversight-seen" value="{{if $v.OversightOn}}1{{else}}0{{end}}">{{end}}
     <label for="body">{{$.T "Message to %s" $v.Peer.Name}}</label>
     <textarea id="body" name="body" class="chat-input" maxlength="{{$v.MaxLen}}" required>{{$v.Draft}}</textarea>
     <div class="actions"><button>{{$.T "Send"}}</button></div>

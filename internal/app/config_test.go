@@ -31,6 +31,7 @@ language: sv
 chat:
   enabled: false
   oversight: true
+  oversight_toggle: false
 sandbox: strict
 development:
   insecure_http: false
@@ -77,6 +78,13 @@ func TestConfigPrecedence(t *testing.T) {
 	if cfg.Addr != ":7002" || cfg.Lang != i18n.SV || cfg.Chat || !cfg.ChatOversight || cfg.Sandbox != sandbox.ModeOff || cfg.DataDir != "/flag/data" {
 		t.Errorf("flags did not override the environment: %+v", cfg)
 	}
+	// The oversight switch can be locked from every source.
+	if c2, err := ParseConfig([]string{"-insecure-http", "-chat-oversight-toggle=false"}, env(nil), io.Discard); err != nil || c2.ChatOversightToggle {
+		t.Errorf("-chat-oversight-toggle=false: %+v, %v", c2, err)
+	}
+	if c2, err := ParseConfig([]string{"-insecure-http"}, env(map[string]string{"GR_REPORT_CHAT_OVERSIGHT_TOGGLE": "off"}), io.Discard); err != nil || c2.ChatOversightToggle {
+		t.Errorf("GR_REPORT_CHAT_OVERSIGHT_TOGGLE=off: %+v, %v", c2, err)
+	}
 	// -port replaces only the port, whatever the source of the address.
 	if cfg, err = ParseConfig([]string{"-config", path, "-port", "8000"}, env(nil), io.Discard); err != nil || cfg.Addr != "127.0.0.1:8000" {
 		t.Errorf("-port with file address: %+v, %v", cfg, err)
@@ -96,7 +104,7 @@ func TestConfigDefaultsAndRelativePaths(t *testing.T) {
 	for _, content := range []string{"", "# nothing here\n", "---\n", "tls:\n"} {
 		path := writeConfig(t, content)
 		cfg, err := ParseConfig([]string{"-config", path, "-insecure-http"}, env(nil), io.Discard)
-		if err != nil || cfg.Addr != ":8443" || cfg.DataDir != "./data" || !cfg.Chat || cfg.ChatOversight || cfg.Lang != i18n.EN || cfg.Sandbox != sandbox.ModeAuto {
+		if err != nil || cfg.Addr != ":8443" || cfg.DataDir != "./data" || !cfg.Chat || cfg.ChatOversight || !cfg.ChatOversightToggle || cfg.Lang != i18n.EN || cfg.Sandbox != sandbox.ModeAuto {
 			t.Errorf("content %q: %+v, %v", content, cfg, err)
 		}
 	}
@@ -173,7 +181,7 @@ func TestConfigYAMLRoundTrip(t *testing.T) {
 		t.Fatal(cfg, err)
 	}
 	out := cfg.YAML()
-	for _, want := range []string{`listen: 127.0.0.1:9443`, "data_dir: /srv/gr", "language: sv", "sandbox: strict", "oversight: true", "enabled: false", "insecure_http: false", "cert: /etc/x/cert.pem"} {
+	for _, want := range []string{`listen: 127.0.0.1:9443`, "data_dir: /srv/gr", "language: sv", "sandbox: strict", "oversight: true", "oversight_toggle: false", "enabled: false", "insecure_http: false", "cert: /etc/x/cert.pem"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered configuration lacks %q:\n%s", want, out)
 		}
@@ -197,7 +205,7 @@ func TestShippedConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.Addr != ":8443" || cfg.DataDir != "/var/lib/gr_report" || cfg.TLSCert != "/etc/gr_report/tls/cert.pem" || cfg.TLSKey != "/etc/gr_report/tls/key.pem" ||
-		cfg.Sandbox != sandbox.ModeStrict || cfg.Lang != i18n.EN || !cfg.Chat || cfg.ChatOversight || cfg.InsecureHTTP || cfg.DevSeed {
+		cfg.Sandbox != sandbox.ModeStrict || cfg.Lang != i18n.EN || !cfg.Chat || cfg.ChatOversight || !cfg.ChatOversightToggle || cfg.InsecureHTTP || cfg.DevSeed {
 		t.Errorf("shipped configuration: %+v", cfg)
 	}
 	raw, err := os.ReadFile(path)
@@ -210,7 +218,7 @@ func TestShippedConfigFile(t *testing.T) {
 	}
 	// Every setting is present in the shipped file.
 	if fc.Listen == nil || fc.DataDir == nil || fc.Language == nil || fc.Sandbox == nil || fc.TLS.Cert == nil || fc.TLS.Key == nil ||
-		fc.Chat.Enabled == nil || fc.Chat.Oversight == nil || fc.Development.InsecureHTTP == nil || fc.Development.DemoAccounts == nil {
+		fc.Chat.Enabled == nil || fc.Chat.Oversight == nil || fc.Chat.OversightToggle == nil || fc.Development.InsecureHTTP == nil || fc.Development.DemoAccounts == nil {
 		t.Errorf("a setting is missing from the shipped file: %+v", fc)
 	}
 }

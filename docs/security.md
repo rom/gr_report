@@ -24,7 +24,7 @@
 | A participant reading or changing another group's data | Role check on every route, object-level check on every report and request, queue actions limited to the user's own queue |
 | Forged sender or time | Both are taken from the session and the server clock, never from the form – for reports and chat messages alike |
 | Reading someone else's chat | A conversation is derived from the requester's own party and the peer in the URL; a conversation one is not part of cannot be named |
-| Covert reading of group chat by the exercise leader | Oversight is off by default, set only by the server operator, announced in every affected conversation and on every affected message, never retroactive, read-only, and logged per look |
+| Covert reading of group chat by the exercise leader | Oversight is off by default; switching it (by the leader, or only by the operator if the switch is locked) is logged; it is announced in every affected conversation, live in open pages, and on every affected message; a message written before the writer could see the notice is held back, not sent; it is never retroactive, read-only, and logged per look |
 | Chat flooding | 20 messages per user per minute, 2 000 characters per message, the general request limits |
 | Script injection through chat | Messages are escaped by the template; the script appends new ones with `textContent` only |
 | Resource exhaustion | Request body limit 256 KiB, header limit 32 KiB, read/write/idle time-outs, field length limits, bounded session and throttle tables, `MemoryMax`/`TasksMax` in the unit |
@@ -52,8 +52,9 @@ of service by flooding the network, and compromised participant devices.
 
 The administrator deliberately has no access to reports or chat. The
 exercise leader cannot read a direct conversation between two groups
-([ADR 0016](adr/0016-chat.md)) unless the operator has switched oversight
-on, in which case the groups are told in the conversation and on every
+([ADR 0016](adr/0016-chat.md)) unless oversight has been switched on – by
+the exercise leader, or by the operator alone when the switch is locked
+([ADR 0019](adr/0019-oversight-switch.md)) – in which case the groups are told in the conversation and on every
 affected message, earlier messages stay private, and each look is logged
 ([ADR 0017](adr/0017-chat-oversight.md)).
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/rom/gr_report/internal/i18n"
 	"github.com/rom/gr_report/internal/model"
+	"github.com/rom/gr_report/internal/store"
 )
 
 // Chat limits.
@@ -69,6 +70,13 @@ type chatLine struct {
 	Overseen bool `json:"overseen"`
 }
 
+// oversightSwitch describes the oversight control shown to leaders.
+type oversightSwitch struct {
+	On        bool
+	CanToggle bool
+	Info      string // who switched it and when, or that the configuration decides
+}
+
 // oversightLink is a group-to-group conversation a leader may look into.
 type oversightLink struct {
 	Name   string
@@ -98,6 +106,14 @@ type chatView struct {
 	// PollURL is where the page script fetches new messages; empty when
 	// an older page is shown.
 	PollURL string
+	// OversightApplies: the conversation is between two groups, so the
+	// notice is part of the page (hidden while oversight is off) and the
+	// form records which state the writer was shown.
+	OversightApplies bool
+	OversightOn      bool
+	PrivacyOverseen  string
+	// Switch is the oversight control on a leader's page.
+	Switch *oversightSwitch
 }
 
 // chatEnabled wraps the chat routes so they disappear when chat is off.
@@ -179,11 +195,15 @@ func (s *Server) chatPage(c *reqCtx, status int, draft, errMsg string) {
 		v.Privacy = c.t("All groups and the exercise leader can read this conversation.")
 	case party == model.ReceiverLeader:
 		v.Privacy = c.t("Only %s and the exercise leaders can read this conversation.", name)
-	case s.overseen(party, peer):
-		v.Privacy = c.t("%s and your group can read this conversation.", name)
-		v.Oversight = c.t("Oversight is on: the exercise leader can read the messages you send here. Messages the exercise leader can read are marked.")
-	default:
+	case !oversightApplies(party, peer):
 		v.Privacy = c.t("Only %s and your group can read this conversation.", name)
+	default:
+		// Both wordings are on the page; the one that applies is shown
+		// and the page script swaps them if oversight changes meanwhile.
+		v.OversightApplies, v.OversightOn = true, s.OversightOn()
+		v.Privacy = c.t("Only %s and your group can read this conversation.", name)
+		v.PrivacyOverseen = c.t("%s and your group can read this conversation.", name)
+		v.Oversight = c.t("Oversight is on: the exercise leader can read the messages you send here. Messages the exercise leader can read are marked.")
 	}
 
 	unread := s.Store.ChatUnread(party)
@@ -208,6 +228,7 @@ func (s *Server) chatPage(c *reqCtx, status int, draft, errMsg string) {
 		add(g.ID, g.DisplayName)
 	}
 	v.Overseen = s.oversightLinks(c, "")
+	v.Switch = s.oversightSwitch(c)
 	s.render(c, status, "chat", c.t("Chat with %s", name), v, errMsg)
 }
 
@@ -223,6 +244,13 @@ func (s *Server) chatSend(c *reqCtx) {
 	body, err := model.CleanChat(draft)
 	if err != nil {
 		s.chatPage(c, http.StatusUnprocessableEntity, draft, i18n.TErr(c.lang, err))
+		return
+	}
+	// The writer must have been shown that the exercise leader can read
+	// the message. If oversight was switched on after the page was loaded,
+	// nothing is sent: the page comes back with the notice and the draft.
+	if s.overseen(party, peer) && c.r.PostForm.Get("oversight_seen") != "1" {
+		s.chatPage(c, http.StatusConflict, draft, c.t("Oversight was switched on after you opened this page: the exercise leader can now read what you send here. Your message has not been sent. Send it again if you still want to."))
 		return
 	}
 	if !s.chatLimit.allow(c.user.ID, s.Now()) {
@@ -263,7 +291,7 @@ func (s *Server) chatPoll(c *reqCtx) {
 		}
 	}
 	c.w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(c.w).Encode(map[string]any{"messages": chatLines(msgs, party)})
+	_ = json.NewEncoder(c.w).Encode(map[string]any{"messages": chatLines(msgs, party), "oversight": s.overseen(party, peer)})
 }
 
 // chatUnreadTotal is the number shown on the Chat menu entry.
@@ -285,13 +313,73 @@ func (s *Server) chatUnreadTotal(u *model.User) int {
 // leader oversight: the setting is on and both ends are groups. The answer
 // is stored with the message, so what the sender was told stays true.
 func (s *Server) overseen(party, peer string) bool {
-	return s.ChatOversight && party != model.ReceiverLeader && peer != model.ReceiverLeader && peer != model.ChatAll
+	return oversightApplies(party, peer) && s.OversightOn()
+}
+
+// oversightApplies reports whether a conversation is one between two
+// groups, the only kind oversight is about.
+func oversightApplies(party, peer string) bool {
+	return party != model.ReceiverLeader && peer != model.ReceiverLeader && peer != model.ChatAll
+}
+
+// settingOversight is the key of the oversight switch in the database.
+const settingOversight = "chat_oversight"
+
+// oversightState returns whether oversight is on and, when that was decided
+// with the switch in the user interface, by whom and when.
+func (s *Server) oversightState() (on bool, set store.Setting, fromUI bool) {
+	if s.ChatOversightToggle {
+		if v, ok := s.Store.Setting(settingOversight); ok {
+			return v.Value == "on", v, true
+		}
+	}
+	return s.ChatOversight, store.Setting{}, false
+}
+
+// OversightOn reports whether leader oversight of group chat is on.
+func (s *Server) OversightOn() bool {
+	on, _, _ := s.oversightState()
+	return on
+}
+
+// chatOversightSet is the switch on the leader's chat page.
+func (s *Server) chatOversightSet(c *reqCtx) {
+	if !s.ChatOversightToggle {
+		s.fail(c, http.StatusForbidden, c.t("Oversight is set in the server configuration and cannot be changed here."))
+		return
+	}
+	var on bool
+	switch c.r.PostForm.Get("oversight") {
+	case "on":
+		on = true
+	case "off":
+	default:
+		s.fail(c, http.StatusBadRequest, c.t("Unknown action."))
+		return
+	}
+	if on == s.OversightOn() {
+		s.redirect(c, "/chat", "")
+		return
+	}
+	value := "off"
+	if on {
+		value = "on"
+	}
+	if s.storeErr(c, s.Store.PutSetting(settingOversight, store.Setting{Value: value, UpdatedBy: c.user.Username, UpdatedAt: s.Now().UTC()})) {
+		return
+	}
+	s.audit(c, "chat_oversight_set", "oversight", value)
+	msg := c.t("Oversight is now off. Conversations between groups are private again.")
+	if on {
+		msg = c.t("Oversight is now on. The groups are told in their conversations; you can read messages they send from now on.")
+	}
+	s.redirect(c, "/chat", msg)
 }
 
 // oversightLinks lists, for a leader and while oversight is on, the
 // group-to-group conversations that hold overseen messages.
 func (s *Server) oversightLinks(c *reqCtx, activeConv string) []oversightLink {
-	if !s.ChatOversight || c.user.Role != model.RoleLeader {
+	if !s.OversightOn() || c.user.Role != model.RoleLeader {
 		return nil
 	}
 	var out []oversightLink
@@ -316,7 +404,7 @@ func (s *Server) oversightLinks(c *reqCtx, activeConv string) []oversightLink {
 func (s *Server) oversightPair(c *reqCtx) (a, b model.User, conv string, ok bool) {
 	a, okA := s.Store.User(c.r.PathValue("a"))
 	b, okB := s.Store.User(c.r.PathValue("b"))
-	if !s.ChatOversight || !okA || !okB || a.Role != model.RoleGroup || b.Role != model.RoleGroup || a.ID == b.ID {
+	if !s.OversightOn() || !okA || !okB || a.Role != model.RoleGroup || b.Role != model.RoleGroup || a.ID == b.ID {
 		return a, b, "", false
 	}
 	conv, _, _ = model.ChatConv(a.ID, b.ID)
@@ -359,6 +447,7 @@ func (s *Server) chatOversight(c *reqCtx) {
 		v.Peers = append(v.Peers, chatPeer{ID: g.ID, Name: g.DisplayName, Unread: unread[cv]})
 	}
 	v.Overseen = s.oversightLinks(c, conv)
+	v.Switch = s.oversightSwitch(c)
 	s.audit(c, "chat_oversight_view", "conversation", conv, "messages", len(msgs))
 	s.render(c, http.StatusOK, "chat", name, v, "")
 }
@@ -383,4 +472,22 @@ func (s *Server) chatOversightPoll(c *reqCtx) {
 	}
 	c.w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(c.w).Encode(map[string]any{"messages": chatLines(msgs, "")})
+}
+
+// oversightSwitch builds the oversight control for a leader's chat page.
+func (s *Server) oversightSwitch(c *reqCtx) *oversightSwitch {
+	if c.user.Role != model.RoleLeader {
+		return nil
+	}
+	on, set, fromUI := s.oversightState()
+	sw := &oversightSwitch{On: on, CanToggle: s.ChatOversightToggle}
+	switch {
+	case fromUI && on:
+		sw.Info = c.t("Switched on by %s at %s.", set.UpdatedBy, fmtTime(set.UpdatedAt))
+	case fromUI:
+		sw.Info = c.t("Switched off by %s at %s.", set.UpdatedBy, fmtTime(set.UpdatedAt))
+	case !s.ChatOversightToggle:
+		sw.Info = c.t("This is set in the server configuration and cannot be changed here.")
+	}
+	return sw
 }

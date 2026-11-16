@@ -22,8 +22,9 @@ changed decision gets a new record that supersedes the old one.
 | [0014](0014-accessibility-and-themes.md) | WCAG 2.1 AA as the bar; themes as checked colour sets | Accepted |
 | [0015](0015-argon2id.md) | Argon2id for password hashing, PBKDF2 hashes upgraded at login | Accepted |
 | [0016](0016-chat.md) | Chat: one shared conversation plus direct conversations between parties | Accepted; amended by 0017 |
-| [0017](0017-chat-oversight.md) | Leader oversight of group chat: off by default, announced, per message, forward-only | Accepted |
-| [0018](0018-yaml-configuration.md) | One YAML configuration file for all settings; environment and flags override | Accepted |
+| [0017](0017-chat-oversight.md) | Leader oversight of group chat: off by default, announced, per message, forward-only | Accepted; amended by 0019 |
+| [0018](0018-yaml-configuration.md) | One YAML configuration file for all settings; environment and flags override | Accepted; amended by 0019 |
+| [0019](0019-oversight-switch.md) | The exercise leader can switch chat oversight in the user interface; the operator can lock it | Accepted |
 
 Template for new records:
 

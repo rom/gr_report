@@ -201,8 +201,18 @@ func (a *App) Run(ctx context.Context) error {
 		srv.DefaultLang = a.Cfg.Lang
 	}
 	srv.Chat, srv.ChatOversight = a.Cfg.Chat, a.Cfg.Chat && a.Cfg.ChatOversight
-	if srv.ChatOversight {
-		a.Log.Info("chat oversight is on: the exercise leader can read chat between groups sent from now on")
+	srv.ChatOversightToggle = a.Cfg.Chat && a.Cfg.ChatOversightToggle
+	if a.Cfg.Chat {
+		source := "configuration"
+		if set, ok := st.Setting("chat_oversight"); ok && srv.ChatOversightToggle {
+			source = "switched in the user interface by " + set.UpdatedBy
+		}
+		if srv.OversightOn() {
+			a.Log.Info("chat oversight is on: the exercise leader can read chat between groups sent from now on",
+				"source", source, "leader_can_switch", srv.ChatOversightToggle)
+		} else {
+			a.Log.Info("chat oversight is off", "source", source, "leader_can_switch", srv.ChatOversightToggle)
+		}
 	}
 
 	ln, err := net.Listen("tcp", cfg.Addr)

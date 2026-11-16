@@ -52,6 +52,7 @@ pure-Go driver ([ADR 0012](adr/0012-sqlite-storage.md)).
 | `reports` | `ts` (Unix nanoseconds), sender and receiver IDs and names, `fields` (JSON array of key/label/value), `request_id`, `status`, `folder`, `search_text` |
 | `chat_messages` (migration 2; `overseen` added by migration 3) | `seq` (autoincrement, the cursor), `conv`, `party_a`, `party_b`, sender party and name, `body`, `overseen` |
 | `chat_read` (migration 2) | primary key (`party`, `conv`), `seq` last seen |
+| `settings` (migration 4) | `key`, `value`, `updated_by`, `updated_at`: settings changed in the user interface (today only `chat_oversight`) |
 
 Indexes on `reports(receiver_id, sender_id, status)`, `reports(sender_id)`
 and `reports(request_id)`. Tables are `STRICT`. There are no deletes:
@@ -145,6 +146,7 @@ handler → html/template → response
 | `GET /chat`, `GET /chat/{peer}` | group, leader | Conversation list and messages; `peer` is `all`, `leader` or a group ID |
 | `POST /chat/{peer}` | group, leader | Send a message |
 | `GET /api/chat/{peer}?after=seq` | group, leader | New messages as JSON; marks them read |
+| `POST /chat/oversight` | leader | The oversight switch (`oversight=on` or `off`), if enabled |
 | `GET /chat/oversight/{a}/{b}` | leader | With oversight on: read-only view of the overseen messages between groups `a` and `b` |
 | `GET /api/chat/oversight/{a}/{b}?after=seq` | leader | New overseen messages as JSON for that view; marks nothing read |
 | `GET /requests`, `GET /requests/{id}` | group, leader | List and read requests |
@@ -167,8 +169,16 @@ handler → html/template → response
   in the path; peers that are the user itself, not a group, or unknown give
   404. Viewing the newest page or polling marks the conversation read;
   viewing an older page does not.
-* A message between two groups gets `overseen = 1` exactly when
-  `Server.ChatOversight` is on at the moment it is sent. The oversight
+* Whether oversight is on is answered by `Server.OversightOn`: the stored
+  switch if `ChatOversightToggle` is set and the switch has been used,
+  otherwise the configured `ChatOversight`.
+* A group-to-group page always contains the oversight notice (hidden when
+  off) and a hidden form field `oversight_seen` with the state shown. The
+  poll response carries the current state; the script updates both. A
+  message that arrives while oversight is on with `oversight_seen` not `1`
+  is answered with 409 and the page, not stored.
+* A message between two groups gets `overseen = 1` exactly when oversight
+  is on at the moment it is sent. The oversight
   page and its polling endpoint share one check (`oversightPair`), query
   with `overseen = 1` only, exist only while the setting is on, have no
   `POST`, never mark anything read, and write an audit entry – the endpoint

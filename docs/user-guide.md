@@ -71,8 +71,22 @@ Only messages sent while oversight is on can be read by the exercise
 leader. Messages without the tag stay private, even if oversight is
 switched on later.
 
-**For exercise leaders:** with oversight on, the chat page lists
-*Oversight of group conversations* below your own conversations. Opening
+Oversight can be switched on or off during the exercise. If you have a
+conversation open, the notice appears or disappears by itself within a few
+seconds. Should you press **Send** just after oversight was switched on,
+before you could see the notice, your message is **not sent**: the page
+shows the notice and keeps your text, and you choose whether to send it.
+
+**For exercise leaders:** the chat page has a section *Oversight of group
+conversations* below your own conversations. It shows whether oversight is
+on, who last changed it, and a button **Switch oversight on** / **Switch
+oversight off**. Switching it on tells the groups at once and lets you read
+what they write to each other *from then on*; switching it off makes their
+conversations private again and closes your view. All exercise leaders
+share the switch. If the page says the setting is made in the server
+configuration, the person running the server has reserved the decision.
+
+With oversight on, the conversations between groups are listed there. Opening
 one shows the messages the two groups have exchanged under oversight. You
 can read but not write there – use the group's own conversation to contact
 a group. New messages appear by themselves within a few seconds, as in any

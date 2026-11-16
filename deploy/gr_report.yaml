@@ -47,6 +47,13 @@ chat:
   # starts if you want it from the beginning.
   # Default: false
   oversight: false
+  # Let the exercise leader switch oversight on and off on the chat page.
+  # The choice is then stored in the database and survives restarts;
+  # "oversight" above is only the state until the switch is first used.
+  # Set this to false to make "oversight" above final: the switch
+  # disappears and anything chosen with it earlier is ignored.
+  # Default: true
+  oversight_toggle: true
 
 # In-process sandbox (Landlock, seccomp, capabilities): auto, strict or off.
 #   strict  refuse to start unless every mechanism is active (Linux >= 6.7)

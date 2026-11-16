@@ -321,6 +321,20 @@ var sv = map[string]string{
 	"messages":                         "meddelanden",
 	"Oversight: you can read this conversation between two groups but not write in it. Only messages sent while oversight was switched on are shown; the groups see which ones.": "Insyn: du kan läsa den här konversationen mellan två grupper men inte skriva i den. Endast meddelanden som skickades medan insyn var påslagen visas; grupperna ser vilka.",
 
+	"Oversight is on":      "Insyn är på",
+	"Oversight is off":     "Insyn är av",
+	"Switch oversight on":  "Slå på insyn",
+	"Switch oversight off": "Slå av insyn",
+	"You can read what groups write to each other from the moment oversight was switched on. They see a notice and a mark on each such message.":                                     "Du kan läsa vad grupperna skriver till varandra från det att insyn slogs på. De ser ett meddelande om detta och en märkning på varje sådant meddelande.",
+	"Conversations between groups are private. If you switch oversight on, the groups are told and you can read what they write to each other from then on, never earlier messages.": "Konversationer mellan grupper är privata. Om du slår på insyn får grupperna veta det, och du kan läsa vad de skriver till varandra från och med då, aldrig tidigare meddelanden.",
+	"Switched on by %s at %s.":  "Påslagen av %s %s.",
+	"Switched off by %s at %s.": "Avslagen av %s %s.",
+	"This is set in the server configuration and cannot be changed here.":                                                                                                            "Detta ställs in i serverns konfiguration och kan inte ändras här.",
+	"Oversight is set in the server configuration and cannot be changed here.":                                                                                                       "Insyn ställs in i serverns konfiguration och kan inte ändras här.",
+	"Oversight is now off. Conversations between groups are private again.":                                                                                                          "Insyn är nu av. Konversationer mellan grupper är privata igen.",
+	"Oversight is now on. The groups are told in their conversations; you can read messages they send from now on.":                                                                  "Insyn är nu på. Grupperna får veta det i sina konversationer; du kan läsa meddelanden de skickar från och med nu.",
+	"Oversight was switched on after you opened this page: the exercise leader can now read what you send here. Your message has not been sent. Send it again if you still want to.": "Insyn slogs på efter att du öppnade den här sidan: övningsledaren kan nu läsa det ni skickar här. Meddelandet har inte skickats. Skicka det igen om du fortfarande vill.",
+
 	// --- validation messages and the names of fields they mention ---
 	"%s is required":                    "%s måste anges",
 	"%s must be at least %d characters": "%s måste ha minst %d tecken",

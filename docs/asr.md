@@ -16,7 +16,7 @@ and how it is verified.
 | F-6 | The leader has a queue of incoming reports and can filter, sort, search and file them; by default one queue per group | Queue view with per-sender queues, `ReportFilter`, `SortReports`, status and folder | `TestReportFlow`, `TestQueuePagination`, `TestFilter`, `TestSort` |
 
 | F-7 | Participants can chat with each other (added in a later iteration) | Shared conversation plus direct conversations between parties, stored in SQLite, polled by the page ([ADR 0016](adr/0016-chat.md)) | `TestChatFlow`, `TestChatPollAndPaging`, `TestChatRateLimit`, `TestChat` (store) |
-| F-8 | The exercise leader can oversee chat between groups, as a setting that participants can see (added in a later iteration) | Operator setting; notice and per-message tag; only messages sent under oversight are shown, read-only ([ADR 0017](adr/0017-chat-oversight.md)) | `TestChatOversight`, `TestMigrationFromEarlierVersion` |
+| F-8 | The exercise leader can oversee chat between groups, as a setting that participants can see (added in a later iteration) | Operator setting; notice and per-message tag; only messages sent under oversight are shown, read-only ([ADR 0017](adr/0017-chat-oversight.md)) | `TestChatOversight`, `TestChatOversightSwitch`, `TestMigrationFromEarlierVersion` |
 
 ## Quality attribute drivers
 

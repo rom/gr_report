@@ -228,22 +228,30 @@ func TestChatOversight(t *testing.T) {
 	A, B := e.id["alpha"], e.id["bravo"]
 	view := "/chat/oversight/" + A + "/" + B
 	const tag = `class="tag chat-overseen">visible to the exercise leader</span>`
+	// The notice is always part of a group-to-group page; it is hidden
+	// while oversight is off so the page script can reveal it at once.
+	const noticeShown = `id="oversight-notice" role="status" data-oversight="on"><strong>`
+	const noticeHidden = `id="oversight-notice" role="status" data-oversight="on" hidden><strong>`
 
 	// Off (the default): private, no tags, no way in for the leader.
-	alpha.post("/chat/"+B, "body", "private before oversight").want(t, 200, "Only Group Bravo and your group can read this conversation.").
-		wantNot(t, "Oversight is on", tag)
+	alpha.post("/chat/"+B, "body", "private before oversight").want(t, 200, "Only Group Bravo and your group can read this conversation.", noticeHidden).
+		wantNot(t, noticeShown, tag)
 	leader.get(view).want(t, 404)
-	leader.get("/chat/all").wantNot(t, "Oversight of group conversations")
+	// Without the switch the leader sees the state and where it is set.
+	leader.get("/chat/all").want(t, 200, "Oversight is off", "This is set in the server configuration and cannot be changed here.").
+		wantNot(t, "Switch oversight", `href="/chat/oversight/`)
+	alpha.get("/chat/all").wantNot(t, "Oversight is off", "Oversight of group conversations")
 
 	// On: the groups are told before they write, and each message that
 	// the leader can read is marked - for sender and receiver.
 	e.srv.ChatOversight = true
 	r := alpha.get("/chat/"+B).want(t, 200, "Group Bravo and your group can read this conversation.",
-		"Oversight is on: the exercise leader can read the messages you send here.", `aria-describedby="oversight-notice"`, "private before oversight")
-	r.wantNot(t, "Only Group Bravo", tag) // the earlier message stays unmarked
-	alpha.post("/chat/"+B, "body", "sent under oversight").want(t, 200, tag)
+		"Oversight is on: the exercise leader can read the messages you send here.", `aria-describedby="oversight-notice"`, "private before oversight",
+		noticeShown, `name="oversight_seen" id="oversight-seen" value="1"`)
+	r.wantNot(t, tag) // the earlier message stays unmarked
+	alpha.post("/chat/"+B, "body", "sent under oversight", "oversight_seen", "1").want(t, 200, tag)
 	bravo.get("/chat/"+A).want(t, 200, "Oversight is on", "sent under oversight", tag)
-	bravo.post("/chat/"+A, "body", "reply under oversight")
+	bravo.post("/chat/"+A, "body", "reply under oversight", "oversight_seen", "1")
 	got := poll(t, alpha, "/api/chat/"+B)
 	if len(got.Messages) != 3 || got.Messages[0].Overseen || !got.Messages[1].Overseen || !got.Messages[2].Overseen {
 		t.Errorf("poll flags = %+v", got.Messages)
@@ -274,7 +282,7 @@ func TestChatOversight(t *testing.T) {
 	if got := poll(t, leader, api+"?after=3"); len(got.Messages) != 0 {
 		t.Errorf("nothing new expected, got %+v", got.Messages)
 	}
-	alpha.post("/chat/"+B, "body", "arrives live")
+	alpha.post("/chat/"+B, "body", "arrives live", "oversight_seen", "1")
 	if got := poll(t, leader, api+"?after=3"); len(got.Messages) != 1 || got.Messages[0].Body != "arrives live" || got.Messages[0].Sender != "Group Alpha" {
 		t.Errorf("live oversight poll = %+v", got.Messages)
 	}
@@ -306,7 +314,7 @@ func TestChatOversight(t *testing.T) {
 	}
 	leader.post(view, "body", "leader writes").want(t, http.StatusMethodNotAllowed)
 	// Looking does not mark anything read for the groups.
-	bravo.post("/chat/"+A, "body", "second reply under oversight")
+	bravo.post("/chat/"+A, "body", "second reply under oversight", "oversight_seen", "1")
 	leader.get(view).want(t, 200, "second reply under oversight")
 	if _, chat := counts(t, alpha); chat != 1 {
 		t.Errorf("alpha unread = %d, want 1 (bravo's second reply)", chat)
@@ -330,7 +338,7 @@ func TestChatOversight(t *testing.T) {
 	e.srv.ChatOversight = false
 	leader.get(view).want(t, 404)
 	leader.get("/api"+view).want(t, 404) // an already open page stops receiving
-	alpha.post("/chat/"+B, "body", "private again").want(t, 200, "Only Group Bravo and your group", tag).wantNot(t, "Oversight is on")
+	alpha.post("/chat/"+B, "body", "private again").want(t, 200, "Only Group Bravo and your group", tag, noticeHidden).wantNot(t, noticeShown)
 	e.srv.ChatOversight = true
 	leader.get(view).want(t, 200, "sent under oversight").wantNot(t, "private again", "private before oversight")
 
@@ -347,4 +355,122 @@ func TestChatOversight(t *testing.T) {
 		t.Fatal("no link to earlier messages")
 	}
 	leader.get(m[1]).want(t, 200, "bulk-004-end", "sent under oversight", "Show the latest messages").wantNot(t, "private before oversight", `data-url="/api/chat`)
+}
+
+func TestChatOversightSwitch(t *testing.T) {
+	e := newEnv(t)
+	e.srv.ChatOversightToggle = true
+	alpha, bravo, leader := e.login("alpha"), e.login("bravo"), e.login("leader")
+	A, B := e.id["alpha"], e.id["bravo"]
+	view := "/chat/oversight/" + A + "/" + B
+	fixed := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	e.srv.Now = func() time.Time { return fixed }
+	pollState := func(c *client, path string) bool {
+		t.Helper()
+		var v struct{ Oversight bool }
+		if err := json.Unmarshal([]byte(c.get(path).body), &v); err != nil {
+			t.Fatal(err)
+		}
+		return v.Oversight
+	}
+
+	// Off to begin with; the leader has a switch, nobody else does.
+	leader.get("/chat/all").want(t, 200, "Oversight of group conversations", "Oversight is off", "Switch oversight on", `action="/chat/oversight"`).
+		wantNot(t, "Switch oversight off", "server configuration")
+	alpha.get("/chat/all").wantNot(t, "Switch oversight", `action="/chat/oversight"`)
+	alpha.post("/chat/oversight", "oversight", "on").want(t, 403)
+	e.login("admin").post("/chat/oversight", "oversight", "on").want(t, 403)
+	leader.postRaw("/chat/oversight", map[string][]string{"oversight": {"on"}}, nil).want(t, 403) // no CSRF token
+	leader.post("/chat/oversight", "oversight", "maybe").want(t, 400)
+	if e.srv.OversightOn() {
+		t.Fatal("oversight switched on by a rejected request")
+	}
+
+	// A group member opens a conversation while oversight is off ...
+	alpha.get("/chat/"+B).want(t, 200, `id="oversight-seen" value="0"`)
+	if pollState(alpha, "/api/chat/"+B) {
+		t.Error("poll reports oversight while it is off")
+	}
+
+	// ... then the leader switches it on.
+	r := leader.post("/chat/oversight", "oversight", "on").want(t, 200, "Oversight is now on.", "Oversight is on", "Switch oversight off",
+		"Switched on by leader at 2026-05-01 12:00:00Z.")
+	if r.path != "/chat/all" {
+		t.Errorf("after switching at %s", r.path)
+	}
+	// The open page learns about it with the next poll ...
+	if !pollState(alpha, "/api/chat/"+B) || pollState(alpha, "/api/chat/all") || pollState(alpha, "/api/chat/leader") {
+		t.Error("poll does not report the oversight state correctly")
+	}
+	// ... and a message written under the old impression is not sent.
+	r = alpha.post("/chat/"+B, "body", "typed before I knew", "oversight_seen", "0")
+	r.want(t, http.StatusConflict, "Oversight was switched on after you opened this page", "Your message has not been sent.",
+		">typed before I knew</textarea>", `id="oversight-seen" value="1"`, `data-oversight="on"><strong>Oversight is on`)
+	alpha.post("/chat/"+B, "body", "also without the field").want(t, http.StatusConflict)
+	conv, _, _ := model.ChatConv(A, B)
+	if n := len(e.st.ChatMessages(conv, 0, 0, 10, false)); n != 0 {
+		t.Fatalf("%d messages stored although the writer had not been told", n)
+	}
+	leader.get(view).want(t, 200, "No messages yet.").wantNot(t, "typed before I knew")
+	// Sending again from the page that shows the notice goes through.
+	alpha.post("/chat/"+B, "body", "typed before I knew", "oversight_seen", "1").want(t, 200, "visible to the exercise leader")
+	leader.get(view).want(t, 200, "typed before I knew")
+	// Conversations the leader is part of anyway need no confirmation.
+	alpha.post("/chat/all", "body", "to all").want(t, 200)
+	alpha.post("/chat/leader", "body", "to staff").want(t, 200)
+
+	// Switching to the state it already has changes nothing.
+	fixed = fixed.Add(time.Hour)
+	leader.post("/chat/oversight", "oversight", "on").want(t, 200, "Switched on by leader at 2026-05-01 12:00:00Z.").wantNot(t, "Oversight is now")
+
+	// The choice is stored: a restarted server keeps it ...
+	restarted := New(e.st, e.srv.Log, false)
+	restarted.ChatOversightToggle = true
+	if !restarted.OversightOn() {
+		t.Error("the switch was not kept across a restart")
+	}
+	// ... unless the operator takes the switch away: then the
+	// configuration decides, whatever was chosen in the user interface.
+	restarted.ChatOversightToggle = false
+	if restarted.OversightOn() {
+		t.Error("a locked configuration must override the stored switch")
+	}
+	restarted.ChatOversight = true
+	if !restarted.OversightOn() {
+		t.Error("locked configuration with oversight on")
+	}
+	e.srv.ChatOversightToggle = false
+	leader.get(view).want(t, 404)
+	leader.post("/chat/oversight", "oversight", "off").want(t, 403, "Oversight is set in the server configuration and cannot be changed here.")
+	leader.get("/chat/all").want(t, 200, "Oversight is off", "This is set in the server configuration").wantNot(t, "Switch oversight")
+	e.srv.ChatOversightToggle = true
+	leader.get(view).want(t, 200, "typed before I knew") // the stored choice applies again
+
+	// Off again: private from now on, the leader's view closes.
+	leader.post("/chat/oversight", "oversight", "off").want(t, 200, "Oversight is now off.", "Oversight is off", "Switch oversight on",
+		"Switched off by leader at 2026-05-01 13:00:00Z.")
+	leader.get(view).want(t, 404)
+	if pollState(bravo, "/api/chat/"+A) {
+		t.Error("poll still reports oversight")
+	}
+	bravo.post("/chat/"+A, "body", "private again", "oversight_seen", "1").want(t, 200) // a stale "on" needs no confirmation
+	leader.post("/chat/oversight", "oversight", "on")
+	leader.get(view).want(t, 200, "typed before I knew").wantNot(t, "private again")
+
+	// The stored choice wins over the configured initial state in both
+	// directions.
+	e.srv.ChatOversight = true
+	leader.post("/chat/oversight", "oversight", "off")
+	if e.srv.OversightOn() {
+		t.Error("configured initial state overrode the switch")
+	}
+
+	// Swedish, and a failed write.
+	leader.hdr = map[string]string{"Accept-Language": "sv"}
+	leader.get("/chat/all").want(t, 200, "Insyn är av", "Slå på insyn", "Avslagen av leader")
+	e.breakWrites()
+	leader.post("/chat/oversight", "oversight", "on").want(t, 500)
+	if e.srv.OversightOn() {
+		t.Error("oversight on although the write failed")
+	}
 }

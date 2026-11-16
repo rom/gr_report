@@ -342,7 +342,7 @@ func TestReadFailurePanics(t *testing.T) {
 		"Report": func() { s.Report("r1") }, "Reports": func() { s.Reports(nil) },
 		"Stats": func() { s.Stats("leader") }, "NewCount": func() { s.NewCount("leader") },
 		"ChatMessages": func() { s.ChatMessages("all", 0, 0, 1, false) }, "ChatUnread": func() { s.ChatUnread("g1") },
-		"ChatOverseen": func() { s.ChatOverseen() },
+		"ChatOverseen": func() { s.ChatOverseen() }, "Setting": func() { s.Setting("k") },
 	}
 	for name, fn := range reads {
 		func() {
@@ -518,6 +518,33 @@ func TestChat(t *testing.T) {
 	}
 }
 
+func TestSettings(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	if _, ok := s.Setting("chat_oversight"); ok {
+		t.Error("unset setting found")
+	}
+	if err := s.PutSetting("chat_oversight", Setting{Value: "on", UpdatedBy: "leader", UpdatedAt: t0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutSetting("chat_oversight", Setting{Value: "off", UpdatedBy: "leader2", UpdatedAt: t0.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutSetting("", Setting{Value: "x"}); err == nil {
+		t.Error("empty key accepted")
+	}
+	s.Close()
+	s2 := open(t, dir)
+	v, ok := s2.Setting("chat_oversight")
+	if !ok || v.Value != "off" || v.UpdatedBy != "leader2" || !v.UpdatedAt.Equal(t0.Add(time.Hour)) {
+		t.Errorf("setting after reopen = %+v, %v", v, ok)
+	}
+	s2.Close()
+	if err := s2.PutSetting("k", Setting{Value: "v"}); !errors.Is(err, ErrClosed) {
+		t.Errorf("write on closed store: %v", err)
+	}
+}
+
 // A database created by an earlier version is upgraded in place, and chat
 // messages from before oversight existed are not exposed by the upgrade.
 func TestMigrationFromEarlierVersion(t *testing.T) {
@@ -548,6 +575,18 @@ func TestMigrationFromEarlierVersion(t *testing.T) {
 	}
 	if got := s2.ChatMessages(conv, 0, 0, 10, false); len(got) != 2 || got[0].Body != "old and private" {
 		t.Errorf("history after upgrade: %+v", got)
+	}
+	// A database from before run-time settings existed gains the table.
+	dir3 := t.TempDir()
+	migrations = saved[:3]
+	s4, err := Open(dir3)
+	migrations = saved
+	if err != nil {
+		t.Fatal(err)
+	}
+	s4.Close()
+	if err := open(t, dir3).PutSetting("k", Setting{Value: "v"}); err != nil {
+		t.Errorf("settings unusable after upgrade: %v", err)
 	}
 	// Opening with only the first migration applied also works.
 	dir1 := t.TempDir()

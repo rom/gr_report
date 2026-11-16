@@ -102,7 +102,18 @@
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
           busy = false;
-          if (!data || !data.messages || !data.messages.length) { return; }
+          if (!data) { return; }
+          // Oversight may be switched on or off while the page is open:
+          // show or hide the notice at once, and record in the form which
+          // state the writer has been shown.
+          var seen = document.getElementById('oversight-seen');
+          if (seen && typeof data.oversight === 'boolean') {
+            each('[data-oversight]', function (el) {
+              el.hidden = (el.getAttribute('data-oversight') === 'on') !== data.oversight;
+            });
+            seen.value = data.oversight ? '1' : '0';
+          }
+          if (!data.messages || !data.messages.length) { return; }
           var stick = atBottom();
           data.messages.forEach(function (m) {
             if (m.seq <= after) { return; }

@@ -47,6 +47,9 @@ type Config struct {
 	Chat bool
 	// ChatOversight lets the exercise leaders read chat between groups.
 	ChatOversight bool
+	// ChatOversightToggle lets the exercise leaders switch oversight on and
+	// off in the user interface; ChatOversight is then the initial state.
+	ChatOversightToggle bool
 
 	ShowVersion bool
 	PrintConfig bool
@@ -64,8 +67,9 @@ type FileConfig struct {
 		Key  *string `yaml:"key,omitempty"`
 	} `yaml:"tls,omitempty"`
 	Chat struct {
-		Enabled   *bool `yaml:"enabled,omitempty"`
-		Oversight *bool `yaml:"oversight,omitempty"`
+		Enabled         *bool `yaml:"enabled,omitempty"`
+		Oversight       *bool `yaml:"oversight,omitempty"`
+		OversightToggle *bool `yaml:"oversight_toggle,omitempty"`
 	} `yaml:"chat,omitempty"`
 	Development struct {
 		InsecureHTTP *bool `yaml:"insecure_http,omitempty"`
@@ -121,7 +125,7 @@ func (c Config) YAML() string {
 	lang, mode := string(c.Lang), string(c.Sandbox)
 	fc.Listen, fc.DataDir, fc.Language, fc.Sandbox = &c.Addr, &c.DataDir, &lang, &mode
 	fc.TLS.Cert, fc.TLS.Key = &c.TLSCert, &c.TLSKey
-	fc.Chat.Enabled, fc.Chat.Oversight = &c.Chat, &c.ChatOversight
+	fc.Chat.Enabled, fc.Chat.Oversight, fc.Chat.OversightToggle = &c.Chat, &c.ChatOversight, &c.ChatOversightToggle
 	fc.Development.InsecureHTTP, fc.Development.DemoAccounts = &c.InsecureHTTP, &c.DevSeed
 	out, err := yaml.Marshal(fc)
 	if err != nil {
@@ -150,7 +154,7 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	var cfg Config
 	var f struct {
 		config, addr, port, data, cert, key, mode, lang string
-		insecure, seed, chat, oversight                 bool
+		insecure, seed, chat, oversight, toggle         bool
 	}
 	fs := flag.NewFlagSet("gr_report", flag.ContinueOnError)
 	fs.SetOutput(out)
@@ -172,6 +176,7 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	fs.StringVar(&f.lang, "lang", "", "default user interface `language`: en or sv; default en (file: language, env GR_REPORT_LANG)")
 	fs.BoolVar(&f.chat, "chat", true, "chat between participants; -chat=false switches it off (file: chat.enabled, env GR_REPORT_CHAT)")
 	fs.BoolVar(&f.oversight, "chat-oversight", false, "let the exercise leader read chat between groups; the groups are told (file: chat.oversight, env GR_REPORT_CHAT_OVERSIGHT)")
+	fs.BoolVar(&f.toggle, "chat-oversight-toggle", true, "let the exercise leader switch oversight on and off in the user interface; -chat-oversight-toggle=false leaves it to the configuration (file: chat.oversight_toggle, env GR_REPORT_CHAT_OVERSIGHT_TOGGLE)")
 	fs.BoolVar(&cfg.PrintConfig, "print-config", false, "print the effective configuration as YAML and exit")
 	fs.BoolVar(&cfg.ShowVersion, "version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
@@ -252,6 +257,7 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	cfg.DevSeed = boolean("dev-seed", f.seed, "", fc.Development.DemoAccounts, false)
 	cfg.Chat = boolean("chat", f.chat, "GR_REPORT_CHAT", fc.Chat.Enabled, true)
 	cfg.ChatOversight = boolean("chat-oversight", f.oversight, "GR_REPORT_CHAT_OVERSIGHT", fc.Chat.Oversight, false)
+	cfg.ChatOversightToggle = boolean("chat-oversight-toggle", f.toggle, "GR_REPORT_CHAT_OVERSIGHT_TOGGLE", fc.Chat.OversightToggle, true)
 	if boolErr != nil {
 		return cfg, boolErr
 	}

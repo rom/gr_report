@@ -70,7 +70,8 @@ development:
 | `tls.key` | – | Private key (PEM) | `GR_REPORT_TLS_KEY` | `-tls-key` |
 | `language` | `en` | Default language, `en` or `sv` | `GR_REPORT_LANG` | `-lang` |
 | `chat.enabled` | `true` | Chat between participants | `GR_REPORT_CHAT` | `-chat` |
-| `chat.oversight` | `false` | Let the exercise leader read chat between groups | `GR_REPORT_CHAT_OVERSIGHT` | `-chat-oversight` |
+| `chat.oversight` | `false` | Let the exercise leader read chat between groups (the initial state when the switch below is enabled) | `GR_REPORT_CHAT_OVERSIGHT` | `-chat-oversight` |
+| `chat.oversight_toggle` | `true` | Let the exercise leader switch oversight on and off on the chat page | `GR_REPORT_CHAT_OVERSIGHT_TOGGLE` | `-chat-oversight-toggle` |
 | `sandbox` | `auto` | `auto`, `strict` or `off` | `GR_REPORT_SANDBOX` | `-sandbox` |
 | `development.insecure_http` | `false` | Plain HTTP, development only | `GR_REPORT_INSECURE_HTTP` | `-insecure-http` |
 | `development.demo_accounts` | `false` | Demo accounts; needs insecure HTTP | – | `-dev-seed` |
@@ -116,8 +117,23 @@ conversation and a tag on every message the leader can read.
 Oversight only covers messages sent while it is on. **Switch it on before
 the exercise starts** if you want it from the beginning; messages written
 earlier stay private and cannot be opened up afterwards. Switching it off
-closes the leaders' view at once. The setting takes effect at start, so
-changing it means restarting the service; its state is logged at start, and
+closes the leaders' view at once.
+
+Who decides:
+
+* With `chat.oversight_toggle: true` (the default) the **exercise leader**
+  switches oversight on and off on the chat page, at any time and without a
+  restart. That choice is stored in the database and survives restarts;
+  `chat.oversight` is then only the state until the switch is first used.
+  **This is the one setting whose effective value may differ from the
+  configuration file.** The leader's chat page shows the current state and
+  who set it; the start-up log shows it with its source; `-print-config`
+  shows only the configured initial value.
+* With `chat.oversight_toggle: false` **you** decide: `chat.oversight` is
+  final, the switch disappears, and anything chosen with it earlier is
+  ignored. Changing it then means editing the file and restarting.
+
+Each change with the switch is logged as `event=chat_oversight_set`, and
 every look by a leader is logged as `event=chat_oversight_view` (with
 `live=true` when an open page received new messages).
 

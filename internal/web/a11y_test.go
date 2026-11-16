@@ -288,7 +288,8 @@ func TestAccessibility(t *testing.T) {
 	alpha.post("/chat/all", "body", "Hello everyone")
 	leader.post("/chat/"+e.id["alpha"], "body", "A question for Alpha")
 	e.srv.ChatOversight = true
-	bravo.post("/chat/"+e.id["alpha"], "body", "Sent under oversight")
+	e.srv.ChatOversightToggle = true
+	bravo.post("/chat/"+e.id["alpha"], "body", "Sent under oversight", "oversight_seen", "1")
 
 	pages := []struct {
 		c     *client
