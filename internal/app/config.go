@@ -31,8 +31,10 @@ type Config struct {
 	// states no preference, and the language of the starter templates.
 	Lang i18n.Lang
 	// Chat enables the chat between the participants.
-	Chat        bool
-	ShowVersion bool
+	Chat bool
+	// ChatOversight lets the exercise leaders read chat between groups.
+	ChatOversight bool
+	ShowVersion   bool
 }
 
 // ErrHelp is returned when -h was given; usage has been printed.
@@ -60,6 +62,7 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	fs.StringVar(&mode, "sandbox", env("GR_REPORT_SANDBOX", string(sandbox.ModeAuto)), "in-process sandbox `mode`: auto, strict or off (env GR_REPORT_SANDBOX)")
 	fs.StringVar(&lang, "lang", env("GR_REPORT_LANG", string(i18n.EN)), "default user interface `language`: en or sv (env GR_REPORT_LANG)")
 	fs.BoolVar(&cfg.Chat, "chat", env("GR_REPORT_CHAT", "on") != "off", "enable the chat between participants; -chat=false switches it off (env GR_REPORT_CHAT=off)")
+	fs.BoolVar(&cfg.ChatOversight, "chat-oversight", env("GR_REPORT_CHAT_OVERSIGHT", "off") == "on", "let the exercise leader read chat between groups; the groups are told (env GR_REPORT_CHAT_OVERSIGHT=on)")
 	fs.BoolVar(&cfg.ShowVersion, "version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return cfg, err

@@ -118,6 +118,8 @@ CREATE TABLE chat_read (
 	seq   INTEGER NOT NULL,
 	PRIMARY KEY (party, conv)
 ) STRICT;
+`, `
+ALTER TABLE chat_messages ADD COLUMN overseen INTEGER NOT NULL DEFAULT 0;
 `}
 
 // Store is safe for concurrent use.
@@ -665,8 +667,8 @@ func (s *Store) AddChatMessage(m model.ChatMessage, a, b string) (model.ChatMess
 	if m.Conv == "" || m.SenderParty == "" || m.Body == "" {
 		return m, errors.New("invalid chat message")
 	}
-	res, err := db.Exec(`INSERT INTO chat_messages (conv, party_a, party_b, ts, sender_party, sender_name, body) VALUES (?,?,?,?,?,?,?)`,
-		m.Conv, a, b, unix(m.Timestamp), m.SenderParty, m.SenderName, m.Body)
+	res, err := db.Exec(`INSERT INTO chat_messages (conv, party_a, party_b, ts, sender_party, sender_name, body, overseen) VALUES (?,?,?,?,?,?,?,?)`,
+		m.Conv, a, b, unix(m.Timestamp), m.SenderParty, m.SenderName, m.Body, b2i(m.Overseen))
 	if err != nil {
 		return m, err
 	}
@@ -677,10 +679,14 @@ func (s *Store) AddChatMessage(m model.ChatMessage, a, b string) (model.ChatMess
 // ChatMessages returns up to limit messages of a conversation in
 // chronological order: those after sequence number after when after > 0
 // (the oldest such), otherwise the newest ones before sequence number
-// before (0: the newest of all).
-func (s *Store) ChatMessages(conv string, after, before int64, limit int) []model.ChatMessage {
-	q := `SELECT seq, conv, ts, sender_party, sender_name, body FROM chat_messages WHERE conv = ?`
+// before (0: the newest of all). With overseenOnly, only messages sent
+// under leader oversight are returned.
+func (s *Store) ChatMessages(conv string, after, before int64, limit int, overseenOnly bool) []model.ChatMessage {
+	q := `SELECT seq, conv, ts, sender_party, sender_name, body, overseen FROM chat_messages WHERE conv = ?`
 	args := []any{conv}
+	if overseenOnly {
+		q += ` AND overseen = 1`
+	}
 	switch {
 	case after > 0:
 		q += ` AND seq > ? ORDER BY seq ASC LIMIT ?`
@@ -698,7 +704,7 @@ func (s *Store) ChatMessages(conv string, after, before int64, limit int) []mode
 	for rows.Next() {
 		var m model.ChatMessage
 		var ts int64
-		must(rows.Scan(&m.Seq, &m.Conv, &ts, &m.SenderParty, &m.SenderName, &m.Body))
+		must(rows.Scan(&m.Seq, &m.Conv, &ts, &m.SenderParty, &m.SenderName, &m.Body, &m.Overseen))
 		m.Timestamp = fromUnix(ts)
 		out = append(out, m)
 	}
@@ -733,6 +739,27 @@ func (s *Store) ChatUnread(party string) map[string]int {
 		var n int
 		must(rows.Scan(&conv, &n))
 		out[conv] = n
+	}
+	must(rows.Err())
+	return out
+}
+
+// OverseenConv is a group-to-group conversation that holds messages sent
+// under leader oversight.
+type OverseenConv struct {
+	A, B  string // the two group IDs
+	Count int    // number of overseen messages
+}
+
+// ChatOverseen lists the conversations with overseen messages.
+func (s *Store) ChatOverseen() []OverseenConv {
+	rows := s.query(`SELECT party_a, party_b, COUNT(*) FROM chat_messages WHERE overseen = 1 GROUP BY conv ORDER BY MAX(seq) DESC`)
+	defer rows.Close()
+	var out []OverseenConv
+	for rows.Next() {
+		var c OverseenConv
+		must(rows.Scan(&c.A, &c.B, &c.Count))
+		out = append(out, c)
 	}
 	must(rows.Err())
 	return out

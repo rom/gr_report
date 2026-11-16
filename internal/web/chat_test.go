@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -180,7 +181,7 @@ func TestChatRateLimit(t *testing.T) {
 		t.Error("no Retry-After")
 	}
 	bravo.post("/chat/all", "body", "others are unaffected").want(t, 200)
-	if n := len(e.st.ChatMessages(model.ChatAll, 0, 0, 100)); n != chatBurst+1 {
+	if n := len(e.st.ChatMessages(model.ChatAll, 0, 0, 100, false)); n != chatBurst+1 {
 		t.Errorf("%d messages stored", n)
 	}
 	now = now.Add(chatWindow)
@@ -219,4 +220,97 @@ func TestChatDisabledAndSwedish(t *testing.T) {
 	if _, chat := counts(t, alpha); chat != 0 {
 		t.Errorf("chat count with chat off = %d", chat)
 	}
+}
+
+func TestChatOversight(t *testing.T) {
+	e := newEnv(t)
+	alpha, bravo, leader := e.login("alpha"), e.login("bravo"), e.login("leader")
+	A, B := e.id["alpha"], e.id["bravo"]
+	view := "/chat/oversight/" + A + "/" + B
+	const tag = `class="tag chat-overseen">visible to the exercise leader</span>`
+
+	// Off (the default): private, no tags, no way in for the leader.
+	alpha.post("/chat/"+B, "body", "private before oversight").want(t, 200, "Only Group Bravo and your group can read this conversation.").
+		wantNot(t, "Oversight is on", tag)
+	leader.get(view).want(t, 404)
+	leader.get("/chat/all").wantNot(t, "Oversight of group conversations")
+
+	// On: the groups are told before they write, and each message that
+	// the leader can read is marked - for sender and receiver.
+	e.srv.ChatOversight = true
+	r := alpha.get("/chat/"+B).want(t, 200, "Group Bravo and your group can read this conversation.",
+		"Oversight is on: the exercise leader can read the messages you send here.", `aria-describedby="oversight-notice"`, "private before oversight")
+	r.wantNot(t, "Only Group Bravo", tag) // the earlier message stays unmarked
+	alpha.post("/chat/"+B, "body", "sent under oversight").want(t, 200, tag)
+	bravo.get("/chat/"+A).want(t, 200, "Oversight is on", "sent under oversight", tag)
+	bravo.post("/chat/"+A, "body", "reply under oversight")
+	got := poll(t, alpha, "/api/chat/"+B)
+	if len(got.Messages) != 3 || got.Messages[0].Overseen || !got.Messages[1].Overseen || !got.Messages[2].Overseen {
+		t.Errorf("poll flags = %+v", got.Messages)
+	}
+	// Conversations that the leader is part of anyway carry no notice.
+	alpha.post("/chat/all", "body", "to all").wantNot(t, "Oversight is on", tag)
+	alpha.post("/chat/leader", "body", "to the staff").wantNot(t, "Oversight is on", tag)
+	for _, m := range e.st.ChatMessages(model.ChatAll, 0, 0, 10, false) {
+		if m.Overseen {
+			t.Error("shared conversation message flagged as overseen")
+		}
+	}
+
+	// The leader sees exactly the messages sent under oversight, read-only.
+	leader.get("/chat/all").want(t, 200, "Oversight of group conversations", "Group Alpha ↔ Group Bravo", `href="`+view+`"`)
+	r = leader.get(view).want(t, 200, "Group Alpha ↔ Group Bravo", "sent under oversight", "reply under oversight",
+		"Oversight: you can read this conversation between two groups but not write in it.")
+	r.wantNot(t, "private before oversight", "<textarea", `data-url="/api/chat`, `id="send"`)
+	leader.get("/chat/oversight/"+B+"/"+A).want(t, 200, "sent under oversight") // either order
+	// The normal routes still give the leader nothing of it, and there is
+	// no write path.
+	leader.get("/chat/"+A).wantNot(t, "sent under oversight", "private before")
+	for _, m := range poll(t, leader, "/api/chat/"+A).Messages {
+		if strings.Contains(m.Body, "oversight") {
+			t.Errorf("leader poll of its own conversation leaked: %+v", m)
+		}
+	}
+	leader.post(view, "body", "leader writes").want(t, http.StatusMethodNotAllowed)
+	// Looking does not mark anything read for the groups.
+	bravo.post("/chat/"+A, "body", "second reply under oversight")
+	leader.get(view).want(t, 200, "second reply under oversight")
+	if _, chat := counts(t, alpha); chat != 1 {
+		t.Errorf("alpha unread = %d, want 1 (bravo's second reply)", chat)
+	}
+
+	// Only leaders, only real pairs of groups.
+	alpha.get(view).want(t, 403)
+	e.login("admin").get(view).want(t, 403)
+	for _, p := range []string{"/chat/oversight/" + A + "/" + A, "/chat/oversight/" + A + "/nope", "/chat/oversight/" + A + "/" + e.id["leader"], "/chat/oversight/leader/" + A} {
+		leader.get(p).want(t, 404, "No such conversation.")
+	}
+	leader.get(view+"?before=-3").want(t, 200, "sent under oversight")
+
+	// Swedish.
+	alpha.hdr = map[string]string{"Accept-Language": "sv"}
+	alpha.get("/chat/"+B).want(t, 200, "Insyn är påslagen", "synligt för övningsledaren")
+	alpha.hdr = nil
+
+	// Switching oversight off closes the leader's view again and new
+	// messages are private; what was marked stays marked for the groups.
+	e.srv.ChatOversight = false
+	leader.get(view).want(t, 404)
+	alpha.post("/chat/"+B, "body", "private again").want(t, 200, "Only Group Bravo and your group", tag).wantNot(t, "Oversight is on")
+	e.srv.ChatOversight = true
+	leader.get(view).want(t, 200, "sent under oversight").wantNot(t, "private again", "private before oversight")
+
+	// Paging of the oversight view.
+	for i := 0; i < chatPageSize+5; i++ {
+		conv, a, b := model.ChatConv(A, B)
+		if _, err := e.st.AddChatMessage(model.ChatMessage{Conv: conv, SenderParty: A, SenderName: "Group Alpha", Body: fmt.Sprintf("bulk-%03d-end", i), Overseen: true}, a, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r = leader.get(view).want(t, 200, "bulk-104-end", "Show earlier messages").wantNot(t, "bulk-004-end")
+	m := regexp.MustCompile(`href="(/chat/oversight/[^"]+\?before=\d+)"`).FindStringSubmatch(r.body)
+	if m == nil {
+		t.Fatal("no link to earlier messages")
+	}
+	leader.get(m[1]).want(t, 200, "bulk-004-end", "sent under oversight", "Show the latest messages").wantNot(t, "private before oversight")
 }

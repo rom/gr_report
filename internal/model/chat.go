@@ -24,6 +24,10 @@ type ChatMessage struct {
 	SenderParty string
 	SenderName  string
 	Body        string
+	// Overseen is set on a message between two groups that was sent while
+	// leader oversight was switched on. Only such messages are ever shown
+	// to the exercise leader; the flag is fixed when the message is sent.
+	Overseen bool
 }
 
 // ChatParty returns the party a user chats as, or "" when the role takes

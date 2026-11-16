@@ -40,7 +40,8 @@ anything that should be on record.
 * **Exercise leader** – a direct conversation between your group and the
   exercise leaders. All leaders see it and any of them may answer.
 * **A group's name** – a direct conversation between your group and that
-  group. Nobody else can read it, not even the exercise leader.
+  group. Normally nobody else can read it, not even the exercise leader –
+  unless *oversight* is switched on, see below.
 
 The line under the heading always says who can read the conversation you
 are looking at. Write in the box at the bottom and press **Send**. New
@@ -55,6 +56,27 @@ minute. **Show earlier messages** pages back through the history.
 
 The person running the server can switch the chat off; the menu entry then
 disappears.
+
+### Oversight by the exercise leader
+
+An exercise can be run with **oversight** of the chat between groups. You
+can always tell:
+
+* a notice above the conversation says *Oversight is on: the exercise
+  leader can read the messages you send here*;
+* every message the exercise leader can read carries the tag *visible to
+  the exercise leader*.
+
+Only messages sent while oversight is on can be read by the exercise
+leader. Messages without the tag stay private, even if oversight is
+switched on later.
+
+**For exercise leaders:** with oversight on, the chat page lists
+*Oversight of group conversations* below your own conversations. Opening
+one shows the messages the two groups have exchanged under oversight. You
+can read but not write there – use the group's own conversation to contact
+a group – and the page does not update by itself. Each time you open one,
+that is recorded in the server's audit log.
 
 ## Logging in
 

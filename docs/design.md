@@ -50,7 +50,7 @@ pure-Go driver ([ADR 0012](adr/0012-sqlite-storage.md)).
 | `templates` | `fields` (JSON array of field definitions), `archived` |
 | `requests` | `template_id`, `recipients` (JSON array, empty = all groups), `closed` |
 | `reports` | `ts` (Unix nanoseconds), sender and receiver IDs and names, `fields` (JSON array of key/label/value), `request_id`, `status`, `folder`, `search_text` |
-| `chat_messages` (migration 2) | `seq` (autoincrement, the cursor), `conv`, `party_a`, `party_b`, sender party and name, `body` |
+| `chat_messages` (migration 2; `overseen` added by migration 3) | `seq` (autoincrement, the cursor), `conv`, `party_a`, `party_b`, sender party and name, `body`, `overseen` |
 | `chat_read` (migration 2) | primary key (`party`, `conv`), `seq` last seen |
 
 Indexes on `reports(receiver_id, sender_id, status)`, `reports(sender_id)`
@@ -145,6 +145,7 @@ handler → html/template → response
 | `GET /chat`, `GET /chat/{peer}` | group, leader | Conversation list and messages; `peer` is `all`, `leader` or a group ID |
 | `POST /chat/{peer}` | group, leader | Send a message |
 | `GET /api/chat/{peer}?after=seq` | group, leader | New messages as JSON; marks them read |
+| `GET /chat/oversight/{a}/{b}` | leader | With oversight on: read-only view of the overseen messages between groups `a` and `b` |
 | `GET /requests`, `GET /requests/{id}` | group, leader | List and read requests |
 | `GET /requests/new`, `POST /requests`, `POST /requests/{id}/close` | leader | Send, close, reopen |
 | `GET /templates`, `GET /templates/new`, `GET,POST /templates/{id}`, `POST /templates`, `POST /templates/{id}/archive` | leader, admin | Templates |
@@ -165,6 +166,10 @@ handler → html/template → response
   in the path; peers that are the user itself, not a group, or unknown give
   404. Viewing the newest page or polling marks the conversation read;
   viewing an older page does not.
+* A message between two groups gets `overseen = 1` exactly when
+  `Server.ChatOversight` is on at the moment it is sent. The oversight
+  route queries with `overseen = 1` only, exists only while the setting is
+  on, has no `POST`, never marks anything read, and writes an audit entry.
 * The `return` parameter of a bulk action is re-parsed into known queue
   parameters and can only lead back to `/queue`.
 * The template editor is plain HTML: existing fields plus three empty

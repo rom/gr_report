@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,6 +65,16 @@ type chatLine struct {
 	Sender string `json:"sender"`
 	Body   string `json:"body"`
 	Mine   bool   `json:"mine"`
+	// Overseen: the exercise leader can read this message.
+	Overseen bool `json:"overseen"`
+}
+
+// oversightLink is a group-to-group conversation a leader may look into.
+type oversightLink struct {
+	Name   string
+	URL    string
+	Count  int
+	Active bool
 }
 
 type chatView struct {
@@ -76,6 +87,14 @@ type chatView struct {
 	Draft      string
 	MaxLen     int
 	Privacy    string
+	// Oversight is the warning shown to groups while the exercise leader
+	// can read what they send in this conversation.
+	Oversight string
+	// Overseen lists the conversations a leader can look into; ReadOnly
+	// marks the page as such a look (no form, no live updates).
+	Overseen []oversightLink
+	ReadOnly bool
+	BaseURL  string
 }
 
 // chatEnabled wraps the chat routes so they disappear when chat is off.
@@ -110,7 +129,8 @@ func (s *Server) chatPeerName(c *reqCtx, party, peer string) (string, bool) {
 func chatLines(msgs []model.ChatMessage, party string) []chatLine {
 	lines := make([]chatLine, 0, len(msgs))
 	for _, m := range msgs {
-		lines = append(lines, chatLine{Seq: m.Seq, Time: fmtTime(m.Timestamp), Sender: m.SenderName, Body: m.Body, Mine: m.SenderParty == party})
+		lines = append(lines, chatLine{Seq: m.Seq, Time: fmtTime(m.Timestamp), Sender: m.SenderName, Body: m.Body,
+			Mine: m.SenderParty == party, Overseen: m.Overseen})
 	}
 	return lines
 }
@@ -132,11 +152,12 @@ func (s *Server) chatPage(c *reqCtx, status int, draft, errMsg string) {
 		before = 0
 	}
 	// One extra row tells whether there are earlier messages.
-	msgs := s.Store.ChatMessages(conv, 0, before, chatPageSize+1)
-	v := &chatView{Peer: chatPeer{ID: peer, Name: name, Active: true}, Draft: draft, MaxLen: model.MaxChatLen, Older: before > 0}
+	msgs := s.Store.ChatMessages(conv, 0, before, chatPageSize+1, false)
+	v := &chatView{Peer: chatPeer{ID: peer, Name: name, Active: true}, Draft: draft, MaxLen: model.MaxChatLen, Older: before > 0,
+		BaseURL: "/chat/" + peer}
 	if len(msgs) > chatPageSize {
 		msgs = msgs[1:]
-		v.EarlierURL = "/chat/" + peer + "?before=" + strconv.FormatInt(msgs[0].Seq, 10)
+		v.EarlierURL = v.BaseURL + "?before=" + strconv.FormatInt(msgs[0].Seq, 10)
 	}
 	v.Lines = chatLines(msgs, party)
 	if n := len(msgs); n > 0 {
@@ -152,6 +173,9 @@ func (s *Server) chatPage(c *reqCtx, status int, draft, errMsg string) {
 		v.Privacy = c.t("All groups and the exercise leader can read this conversation.")
 	case party == model.ReceiverLeader:
 		v.Privacy = c.t("Only %s and the exercise leaders can read this conversation.", name)
+	case s.overseen(party, peer):
+		v.Privacy = c.t("%s and your group can read this conversation.", name)
+		v.Oversight = c.t("Oversight is on: the exercise leader can read the messages you send here. Messages the exercise leader can read are marked.")
 	default:
 		v.Privacy = c.t("Only %s and your group can read this conversation.", name)
 	}
@@ -177,6 +201,7 @@ func (s *Server) chatPage(c *reqCtx, status int, draft, errMsg string) {
 		}
 		add(g.ID, g.DisplayName)
 	}
+	v.Overseen = s.oversightLinks(c, "")
 	s.render(c, status, "chat", c.t("Chat with %s", name), v, errMsg)
 }
 
@@ -201,7 +226,7 @@ func (s *Server) chatSend(c *reqCtx) {
 	}
 	conv, a, b := model.ChatConv(party, peer)
 	m, err := s.Store.AddChatMessage(model.ChatMessage{Conv: conv, Timestamp: s.Now().UTC(), SenderParty: party,
-		SenderName: c.user.DisplayName, Body: body}, a, b)
+		SenderName: c.user.DisplayName, Body: body, Overseen: s.overseen(party, peer)}, a, b)
 	if s.storeErr(c, err) {
 		return
 	}
@@ -222,9 +247,9 @@ func (s *Server) chatPoll(c *reqCtx) {
 	conv, _, _ := model.ChatConv(party, peer)
 	var msgs []model.ChatMessage
 	if after > 0 {
-		msgs = s.Store.ChatMessages(conv, after, 0, chatPageSize)
+		msgs = s.Store.ChatMessages(conv, after, 0, chatPageSize, false)
 	} else {
-		msgs = s.Store.ChatMessages(conv, 0, 0, chatPageSize)
+		msgs = s.Store.ChatMessages(conv, 0, 0, chatPageSize, false)
 	}
 	if n := len(msgs); n > 0 {
 		if err := s.Store.MarkChatRead(party, conv, msgs[n-1].Seq); err != nil {
@@ -246,4 +271,72 @@ func (s *Server) chatUnreadTotal(u *model.User) int {
 		total += n
 	}
 	return total
+}
+
+// ---- leader oversight of group-to-group conversations ----
+
+// overseen reports whether a message from party to peer is sent under
+// leader oversight: the setting is on and both ends are groups. The answer
+// is stored with the message, so what the sender was told stays true.
+func (s *Server) overseen(party, peer string) bool {
+	return s.ChatOversight && party != model.ReceiverLeader && peer != model.ReceiverLeader && peer != model.ChatAll
+}
+
+// oversightLinks lists, for a leader and while oversight is on, the
+// group-to-group conversations that hold overseen messages.
+func (s *Server) oversightLinks(c *reqCtx, activeConv string) []oversightLink {
+	if !s.ChatOversight || c.user.Role != model.RoleLeader {
+		return nil
+	}
+	var out []oversightLink
+	for _, oc := range s.Store.ChatOverseen() {
+		a, okA := s.Store.User(oc.A)
+		b, okB := s.Store.User(oc.B)
+		if !okA || !okB {
+			continue
+		}
+		conv, _, _ := model.ChatConv(oc.A, oc.B)
+		if strings.ToLower(b.DisplayName) < strings.ToLower(a.DisplayName) {
+			a, b = b, a // show the pair in alphabetical order
+		}
+		out = append(out, oversightLink{Name: a.DisplayName + " ↔ " + b.DisplayName, URL: "/chat/oversight/" + a.ID + "/" + b.ID,
+			Count: oc.Count, Active: conv == activeConv})
+	}
+	return out
+}
+
+// chatOversight shows a leader the overseen messages of a conversation
+// between two groups. It is read-only and every look is written to the
+// audit log.
+func (s *Server) chatOversight(c *reqCtx) {
+	a, okA := s.Store.User(c.r.PathValue("a"))
+	b, okB := s.Store.User(c.r.PathValue("b"))
+	if !s.ChatOversight || !okA || !okB || a.Role != model.RoleGroup || b.Role != model.RoleGroup || a.ID == b.ID {
+		s.fail(c, http.StatusNotFound, c.t("No such conversation."))
+		return
+	}
+	conv, _, _ := model.ChatConv(a.ID, b.ID)
+	before, _ := strconv.ParseInt(c.r.URL.Query().Get("before"), 10, 64)
+	if before < 0 {
+		before = 0
+	}
+	name := a.DisplayName + " ↔ " + b.DisplayName
+	v := &chatView{Peer: chatPeer{Name: name}, ReadOnly: true, Older: before > 0, BaseURL: "/chat/oversight/" + a.ID + "/" + b.ID,
+		Privacy: c.t("Oversight: you can read this conversation between two groups but not write in it. Only messages sent while oversight was switched on are shown; the groups see which ones.")}
+	msgs := s.Store.ChatMessages(conv, 0, before, chatPageSize+1, true)
+	if len(msgs) > chatPageSize {
+		msgs = msgs[1:]
+		v.EarlierURL = v.BaseURL + "?before=" + strconv.FormatInt(msgs[0].Seq, 10)
+	}
+	v.Lines = chatLines(msgs, "")
+	unread := s.Store.ChatUnread(model.ReceiverLeader)
+	cvAll, _, _ := model.ChatConv(model.ReceiverLeader, model.ChatAll)
+	v.Peers = append(v.Peers, chatPeer{ID: model.ChatAll, Name: c.t("Everyone"), Unread: unread[cvAll]})
+	for _, g := range s.Store.Groups() {
+		cv, _, _ := model.ChatConv(model.ReceiverLeader, g.ID)
+		v.Peers = append(v.Peers, chatPeer{ID: g.ID, Name: g.DisplayName, Unread: unread[cv]})
+	}
+	v.Overseen = s.oversightLinks(c, conv)
+	s.audit(c, "chat_oversight_view", "conversation", conv, "messages", len(msgs))
+	s.render(c, http.StatusOK, "chat", name, v, "")
 }

@@ -10,27 +10,39 @@
       {{if .Unread}}<span class="count"><span class="badge">{{.Unread}}</span><span class="sr-only"> {{$.T "unread messages"}}</span></span>{{end}}</a></li>
   {{end}}
   </ul>
+  {{if $v.Overseen}}
+  <h3 id="h-oversight">{{$.T "Oversight of group conversations"}}</h3>
+  <ul class="queues" aria-labelledby="h-oversight">
+  {{range $v.Overseen}}
+    <li><a href="{{.URL}}"{{if .Active}} class="active" aria-current="true"{{end}}><span>{{.Name}}</span>
+      <span class="count">{{.Count}}<span class="sr-only"> {{$.T "messages"}}</span></span></a></li>
+  {{end}}
+  </ul>
+  {{end}}
 </nav>
 <section aria-labelledby="h-conv">
   <h2 id="h-conv">{{$v.Peer.Name}}</h2>
   <p class="help">{{$v.Privacy}}</p>
+  {{if $v.Oversight}}<p class="notice" id="oversight-notice"><strong>{{$v.Oversight}}</strong></p>{{end}}
   {{if $v.EarlierURL}}<p><a href="{{$v.EarlierURL}}">{{$.T "Show earlier messages"}}</a></p>{{end}}
-  {{if $v.Older}}<p><a href="/chat/{{$v.Peer.ID}}">{{$.T "Show the latest messages"}}</a></p>{{end}}
+  {{if $v.Older}}<p><a href="{{$v.BaseURL}}">{{$.T "Show the latest messages"}}</a></p>{{end}}
   <div class="panel chat-box" tabindex="0" role="group" aria-label="{{$.T "Messages"}}">
     <p class="muted" id="chat-empty"{{if $v.Lines}} hidden{{end}}>{{$.T "No messages yet."}}</p>
-    <ol class="chat-log" id="chat-log" role="log" aria-labelledby="h-conv"{{if not $v.Older}} data-url="/api/chat/{{$v.Peer.ID}}" data-after="{{$v.Last}}"{{end}}>
+    <ol class="chat-log" id="chat-log" role="log" aria-labelledby="h-conv"{{if not (or $v.Older $v.ReadOnly)}} data-url="/api/chat/{{$v.Peer.ID}}" data-after="{{$v.Last}}"{{end}}>
     {{range $v.Lines}}
-      <li class="chat-line{{if .Mine}} mine{{end}}"><p class="chat-meta"><strong class="chat-sender">{{.Sender}}</strong> <time>{{.Time}}</time></p><p class="body">{{.Body}}</p></li>
+      <li class="chat-line{{if .Mine}} mine{{end}}"><p class="chat-meta"><strong class="chat-sender">{{.Sender}}</strong> <time>{{.Time}}</time>{{if and .Overseen (not $v.ReadOnly)}} <span class="tag chat-overseen">{{$.T "visible to the exercise leader"}}</span>{{end}}</p><p class="body">{{.Body}}</p></li>
     {{end}}
     </ol>
   </div>
-  <template id="chat-line"><li class="chat-line"><p class="chat-meta"><strong class="chat-sender"></strong> <time></time></p><p class="body"></p></li></template>
-  <form class="panel" id="send" method="post" action="/chat/{{$v.Peer.ID}}"{{if .Error}} aria-describedby="error"{{end}}>
+  {{if not $v.ReadOnly}}
+  <template id="chat-line"><li class="chat-line"><p class="chat-meta"><strong class="chat-sender"></strong> <time></time> <span class="tag chat-overseen" hidden>{{$.T "visible to the exercise leader"}}</span></p><p class="body"></p></li></template>
+  <form class="panel" id="send" method="post" action="/chat/{{$v.Peer.ID}}"{{if or .Error $v.Oversight}} aria-describedby="{{if .Error}}error {{end}}{{if $v.Oversight}}oversight-notice{{end}}"{{end}}>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <label for="body">{{$.T "Message to %s" $v.Peer.Name}}</label>
     <textarea id="body" name="body" class="chat-input" maxlength="{{$v.MaxLen}}" required>{{$v.Draft}}</textarea>
     <div class="actions"><button>{{$.T "Send"}}</button></div>
   </form>
+  {{end}}
 </section>
 </div>
 {{end}}

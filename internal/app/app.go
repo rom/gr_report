@@ -200,7 +200,10 @@ func (a *App) Run(ctx context.Context) error {
 	if a.Cfg.Lang != "" {
 		srv.DefaultLang = a.Cfg.Lang
 	}
-	srv.Chat = a.Cfg.Chat
+	srv.Chat, srv.ChatOversight = a.Cfg.Chat, a.Cfg.Chat && a.Cfg.ChatOversight
+	if srv.ChatOversight {
+		a.Log.Info("chat oversight is on: the exercise leader can read chat between groups sent from now on")
+	}
 
 	ln, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {

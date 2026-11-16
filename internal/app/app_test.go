@@ -40,7 +40,7 @@ func TestParseConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Addr != ":8443" || cfg.DataDir != "./data" || cfg.Sandbox != sandbox.ModeAuto || cfg.InsecureHTTP || cfg.DevSeed || cfg.Lang != i18n.EN || !cfg.Chat {
+	if cfg.Addr != ":8443" || cfg.DataDir != "./data" || cfg.Sandbox != sandbox.ModeAuto || cfg.InsecureHTTP || cfg.DevSeed || cfg.Lang != i18n.EN || !cfg.Chat || cfg.ChatOversight {
 		t.Errorf("defaults = %+v", cfg)
 	}
 
@@ -76,6 +76,12 @@ func TestParseConfig(t *testing.T) {
 	}
 	if cfg, err = ParseConfig(tls, env(map[string]string{"GR_REPORT_CHAT": "off"}), io.Discard); err != nil || cfg.Chat {
 		t.Errorf("GR_REPORT_CHAT=off = %+v, %v", cfg, err)
+	}
+	if cfg, err = ParseConfig(append([]string{"-chat-oversight"}, tls...), env(nil), io.Discard); err != nil || !cfg.ChatOversight {
+		t.Errorf("-chat-oversight = %+v, %v", cfg, err)
+	}
+	if cfg, err = ParseConfig(tls, env(map[string]string{"GR_REPORT_CHAT_OVERSIGHT": "on"}), io.Discard); err != nil || !cfg.ChatOversight {
+		t.Errorf("GR_REPORT_CHAT_OVERSIGHT=on = %+v, %v", cfg, err)
 	}
 	if cfg, err = ParseConfig([]string{"-version"}, env(nil), io.Discard); err != nil || !cfg.ShowVersion {
 		t.Errorf("-version = %+v, %v", cfg, err)
@@ -196,7 +202,7 @@ func start(t *testing.T, a *App, scheme string) (string, func() error) {
 func TestRunHTTPDevSeed(t *testing.T) {
 	dir := t.TempDir()
 	var logs syncBuffer
-	a := &App{Cfg: Config{Addr: "127.0.0.1:0", DataDir: dir, InsecureHTTP: true, DevSeed: true, Sandbox: sandbox.ModeOff, Lang: i18n.SV, Chat: true},
+	a := &App{Cfg: Config{Addr: "127.0.0.1:0", DataDir: dir, InsecureHTTP: true, DevSeed: true, Sandbox: sandbox.ModeOff, Lang: i18n.SV, Chat: true, ChatOversight: true},
 		Log: slog.New(slog.NewTextHandler(&logs, nil))}
 	base, stop := start(t, a, "http")
 
@@ -215,7 +221,7 @@ func TestRunHTTPDevSeed(t *testing.T) {
 	if err := stop(); err != nil {
 		t.Errorf("Run returned %v", err)
 	}
-	for _, want := range []string{"plain HTTP", "publicly known password", "listening", "shutting down", "sandbox disabled"} {
+	for _, want := range []string{"plain HTTP", "publicly known password", "listening", "shutting down", "sandbox disabled", "chat oversight is on"} {
 		if !strings.Contains(logs.String(), want) {
 			t.Errorf("log lacks %q", want)
 		}

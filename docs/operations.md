@@ -54,12 +54,30 @@ reads `/etc/gr_report/gr_report.env`.
 | `-sandbox` | `GR_REPORT_SANDBOX` | `auto` | `auto`, `strict` or `off` |
 | `-lang` | `GR_REPORT_LANG` | `en` | Default language, `en` or `sv` |
 | `-chat` | `GR_REPORT_CHAT` | on | Chat between participants; `-chat=false` or `GR_REPORT_CHAT=off` removes it |
+| `-chat-oversight` | `GR_REPORT_CHAT_OVERSIGHT=on` | off | Let the exercise leader read chat between groups |
 | `-insecure-http` | `GR_REPORT_INSECURE_HTTP=1` | off | Plain HTTP, development only |
 | `-dev-seed` | – | off | Demo accounts; only with `-insecure-http` |
 | `-version` | – | | Print version |
 
 Without `-tls-cert`/`-tls-key` the server refuses to start unless
 `-insecure-http` is given.
+
+### Chat oversight
+
+By default a conversation between two groups can be read by those two
+groups only. With `GR_REPORT_CHAT_OVERSIGHT=on` the exercise leaders can
+read – not write – such conversations. The groups see a notice in the
+conversation and a tag on every message the leader can read.
+
+Oversight only covers messages sent while it is on. **Switch it on before
+the exercise starts** if you want it from the beginning; messages written
+earlier stay private and cannot be opened up afterwards. Switching it off
+closes the leaders' view at once. The setting takes effect at start, so
+changing it means restarting the service; its state is logged at start, and
+every look by a leader is logged as `event=chat_oversight_view`.
+
+Tell the participants in the exercise instructions whether oversight is
+used.
 
 ### Language
 

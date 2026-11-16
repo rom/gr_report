@@ -341,7 +341,8 @@ func TestReadFailurePanics(t *testing.T) {
 		"Request": func() { s.Request("q1") }, "Requests": func() { s.Requests() },
 		"Report": func() { s.Report("r1") }, "Reports": func() { s.Reports(nil) },
 		"Stats": func() { s.Stats("leader") }, "NewCount": func() { s.NewCount("leader") },
-		"ChatMessages": func() { s.ChatMessages("all", 0, 0, 1) }, "ChatUnread": func() { s.ChatUnread("g1") },
+		"ChatMessages": func() { s.ChatMessages("all", 0, 0, 1, false) }, "ChatUnread": func() { s.ChatUnread("g1") },
+		"ChatOverseen": func() { s.ChatOverseen() },
 	}
 	for name, fn := range reads {
 		func() {
@@ -422,23 +423,23 @@ func TestChat(t *testing.T) {
 		t.Fatalf("conversation keys: %q %q %q", c12, c21, cl2)
 	}
 
-	all := s.ChatMessages(model.ChatAll, 0, 0, 10)
+	all := s.ChatMessages(model.ChatAll, 0, 0, 10, false)
 	if len(all) != 2 || all[0].Body != "hello all" || all[1].Body != "welcome" || !all[0].Timestamp.Equal(t0) || all[1].SenderName != "Leader" {
 		t.Errorf("all = %+v", all)
 	}
-	if got := s.ChatMessages(c12, 0, 0, 10); len(got) != 2 || got[0].Body != "psst bravo" || got[1].SenderParty != "g2" {
+	if got := s.ChatMessages(c12, 0, 0, 10, false); len(got) != 2 || got[0].Body != "psst bravo" || got[1].SenderParty != "g2" {
 		t.Errorf("direct = %+v", got)
 	}
-	if got := s.ChatMessages(model.ChatAll, 0, 0, 1); len(got) != 1 || got[0].Seq != m2.Seq {
+	if got := s.ChatMessages(model.ChatAll, 0, 0, 1, false); len(got) != 1 || got[0].Seq != m2.Seq {
 		t.Errorf("limit keeps the newest: %+v", got)
 	}
-	if got := s.ChatMessages(model.ChatAll, m1.Seq, 0, 10); len(got) != 1 || got[0].Seq != m2.Seq {
+	if got := s.ChatMessages(model.ChatAll, m1.Seq, 0, 10, false); len(got) != 1 || got[0].Seq != m2.Seq {
 		t.Errorf("after = %+v", got)
 	}
-	if got := s.ChatMessages(model.ChatAll, 0, m2.Seq, 10); len(got) != 1 || got[0].Seq != m1.Seq {
+	if got := s.ChatMessages(model.ChatAll, 0, m2.Seq, 10, false); len(got) != 1 || got[0].Seq != m1.Seq {
 		t.Errorf("before = %+v", got)
 	}
-	if got := s.ChatMessages("nobody|here", 0, 0, 10); len(got) != 0 {
+	if got := s.ChatMessages("nobody|here", 0, 0, 10, false); len(got) != 0 {
 		t.Errorf("unknown conversation = %+v", got)
 	}
 
@@ -476,6 +477,24 @@ func TestChat(t *testing.T) {
 	send("leader", "Leader", model.ChatAll, "new one")
 	want("g1", map[string]int{model.ChatAll: 1})
 
+	// Oversight: the flag is stored per message and selects what a leader
+	// may see; messages sent before it was switched on stay private.
+	if got := s.ChatOverseen(); len(got) != 0 {
+		t.Errorf("overseen conversations before any: %+v", got)
+	}
+	if _, err := s.AddChatMessage(model.ChatMessage{Conv: c12, Timestamp: t0, SenderParty: "g1", SenderName: "Alpha", Body: "watched", Overseen: true}, "g1", "g2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.ChatMessages(c12, 0, 0, 10, true); len(got) != 1 || got[0].Body != "watched" || !got[0].Overseen {
+		t.Errorf("overseen only = %+v", got)
+	}
+	if got := s.ChatMessages(c12, 0, 0, 10, false); len(got) != 3 || got[0].Overseen || !got[2].Overseen {
+		t.Errorf("all with flags = %+v", got)
+	}
+	if got := s.ChatOverseen(); len(got) != 1 || got[0].A != "g1" || got[0].B != "g2" || got[0].Count != 1 {
+		t.Errorf("ChatOverseen = %+v", got)
+	}
+
 	for _, bad := range []model.ChatMessage{{}, {Conv: "all", Body: "x"}, {Conv: "all", SenderParty: "g1"}} {
 		if _, err := s.AddChatMessage(bad, "", ""); err == nil {
 			t.Errorf("invalid message %+v accepted", bad)
@@ -484,7 +503,7 @@ func TestChat(t *testing.T) {
 	// Messages and read markers survive a restart.
 	s.Close()
 	s2 := open(t, dir)
-	if got := s2.ChatMessages(model.ChatAll, 0, 0, 10); len(got) != 3 || got[2].Body != "new one" {
+	if got := s2.ChatMessages(model.ChatAll, 0, 0, 10, false); len(got) != 3 || got[2].Body != "new one" {
 		t.Errorf("after reopen: %+v", got)
 	}
 	if got := s2.ChatUnread("g1"); got[model.ChatAll] != 1 || len(got) != 1 {
@@ -499,17 +518,22 @@ func TestChat(t *testing.T) {
 	}
 }
 
-// A database created before the chat existed is upgraded in place.
-func TestMigrationFromVersion1(t *testing.T) {
+// A database created by an earlier version is upgraded in place, and chat
+// messages from before oversight existed are not exposed by the upgrade.
+func TestMigrationFromEarlierVersion(t *testing.T) {
 	dir := t.TempDir()
 	saved := migrations
-	migrations = saved[:1]
+	migrations = saved[:2]
 	s, err := Open(dir)
 	migrations = saved
 	if err != nil {
 		t.Fatal(err)
 	}
 	seed(t, s)
+	// A chat message written before the oversight column existed.
+	if _, err := s.db.Exec(`INSERT INTO chat_messages (conv, party_a, party_b, ts, sender_party, sender_name, body) VALUES ('g1|g2','g1','g2',1,'g1','A','old and private')`); err != nil {
+		t.Fatal(err)
+	}
 	s.Close()
 	s2 := open(t, dir)
 	if len(s2.Reports(nil)) != 4 || len(s2.Users()) != 4 {
@@ -519,6 +543,22 @@ func TestMigrationFromVersion1(t *testing.T) {
 	if _, err := s2.AddChatMessage(model.ChatMessage{Conv: conv, Timestamp: t0, SenderParty: "g1", SenderName: "A", Body: "hi"}, a, b); err != nil {
 		t.Errorf("chat unusable after upgrade: %v", err)
 	}
+	if got := s2.ChatMessages(conv, 0, 0, 10, true); len(got) != 0 {
+		t.Errorf("messages from before the upgrade became overseen: %+v", got)
+	}
+	if got := s2.ChatMessages(conv, 0, 0, 10, false); len(got) != 2 || got[0].Body != "old and private" {
+		t.Errorf("history after upgrade: %+v", got)
+	}
+	// Opening with only the first migration applied also works.
+	dir1 := t.TempDir()
+	migrations = saved[:1]
+	s3, err := Open(dir1)
+	migrations = saved
+	if err != nil {
+		t.Fatal(err)
+	}
+	s3.Close()
+	open(t, dir1)
 }
 
 // FuzzReportRoundTrip stores arbitrary text and searches with arbitrary

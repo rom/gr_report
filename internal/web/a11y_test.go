@@ -287,6 +287,8 @@ func TestAccessibility(t *testing.T) {
 	leader.post(sitrep+"/status", "action", "file", "folder", "Logistics")
 	alpha.post("/chat/all", "body", "Hello everyone")
 	leader.post("/chat/"+e.id["alpha"], "body", "A question for Alpha")
+	e.srv.ChatOversight = true
+	bravo.post("/chat/"+e.id["alpha"], "body", "Sent under oversight")
 
 	pages := []struct {
 		c     *client
@@ -298,7 +300,8 @@ func TestAccessibility(t *testing.T) {
 			"/reports/new?template=" + e.id["SITREP"], "/reports/new?request=" + reqID, "/reports/nope", "/admin/users",
 			"/chat/all", "/chat/leader", "/chat/" + e.id["bravo"], "/chat/nope"}},
 		{leader, "leader", []string{"/queue", "/queue?sort=subject&dir=asc&q=fine&status=filed", "/queue?q=nomatch", "/queue?auto=1", sitrep, "/requests", "/requests/new", reqPath,
-			"/templates", "/templates/new", "/templates/" + e.id["SITREP"], "/settings", "/password", "/chat/all", "/chat/" + e.id["alpha"]}},
+			"/templates", "/templates/new", "/templates/" + e.id["SITREP"], "/settings", "/password", "/chat/all", "/chat/" + e.id["alpha"],
+			"/chat/oversight/" + e.id["alpha"] + "/" + e.id["bravo"]}},
 		{admin, "admin", []string{"/admin/users", "/templates", "/templates/new", "/settings", "/queue"}},
 	}
 	for _, lang := range []string{"en", "sv"} {

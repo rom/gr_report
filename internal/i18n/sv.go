@@ -314,6 +314,13 @@ var sv = map[string]string{
 	"Only %s and your group can read this conversation.":                 "Endast %s och er grupp kan läsa den här konversationen.",
 	"You are sending messages too quickly. Wait a moment and try again.": "Du skickar meddelanden för snabbt. Vänta en stund och försök igen.",
 
+	"%s and your group can read this conversation.": "%s och er grupp kan läsa den här konversationen.",
+	"Oversight is on: the exercise leader can read the messages you send here. Messages the exercise leader can read are marked.": "Insyn är påslagen: övningsledaren kan läsa de meddelanden ni skickar här. Meddelanden som övningsledaren kan läsa är märkta.",
+	"visible to the exercise leader":   "synligt för övningsledaren",
+	"Oversight of group conversations": "Insyn i gruppkonversationer",
+	"messages":                         "meddelanden",
+	"Oversight: you can read this conversation between two groups but not write in it. Only messages sent while oversight was switched on are shown; the groups see which ones.": "Insyn: du kan läsa den här konversationen mellan två grupper men inte skriva i den. Endast meddelanden som skickades medan insyn var påslagen visas; grupperna ser vilka.",
+
 	// --- validation messages and the names of fields they mention ---
 	"%s is required":                    "%s måste anges",
 	"%s must be at least %d characters": "%s måste ha minst %d tecken",

@@ -94,6 +94,10 @@ type Server struct {
 	DefaultLang i18n.Lang
 	// Chat enables the chat between the participants.
 	Chat bool
+	// ChatOversight lets the exercise leaders read group-to-group messages
+	// sent while it is on. The groups are told, per conversation and per
+	// message.
+	ChatOversight bool
 
 	chatLimit chatLimiter
 	pages     map[string]*template.Template
@@ -490,6 +494,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /chat/{peer}", s.authed(s.chatEnabled(s.chat), group, leader))
 	mux.HandleFunc("POST /chat/{peer}", s.authed(s.chatEnabled(s.chatSend), group, leader))
 	mux.HandleFunc("GET /api/chat/{peer}", s.authed(s.chatEnabled(s.chatPoll), group, leader))
+	mux.HandleFunc("GET /chat/oversight/{a}/{b}", s.authed(s.chatEnabled(s.chatOversight), leader))
 
 	mux.HandleFunc("GET /requests", s.authed(s.requests, group, leader))
 	mux.HandleFunc("GET /requests/new", s.authed(s.requestForm, leader))
