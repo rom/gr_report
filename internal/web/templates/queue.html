@@ -1,0 +1,100 @@
+{{define "content"}}
+{{$v := .Data}}{{$p := $v.P}}
+<h1>{{.Title}}</h1>
+<div class="{{if not $v.Sent}}layout{{end}}">
+{{if not $v.Sent}}
+<aside class="panel">
+  <ul class="queues">
+  {{range $v.Queues}}
+    <li><a href="{{.URL}}"{{if .Active}} class="active" aria-current="true"{{end}}><span>{{.Name}}</span>
+      <span class="count">{{if .New}}<span class="badge">{{.New}}</span> {{end}}{{.Total}}</span></a></li>
+  {{end}}
+  </ul>
+  <p class="help">One queue per group. The badge counts new reports.</p>
+</aside>
+{{end}}
+<div>
+<form class="panel filters" method="get" action="{{$v.Base}}">
+  {{if $p.Group}}<input type="hidden" name="group" value="{{$p.Group}}">{{end}}
+  {{if ne $p.Sort "time"}}<input type="hidden" name="sort" value="{{$p.Sort}}">{{end}}
+  {{if $p.Asc}}<input type="hidden" name="dir" value="asc">{{end}}
+  {{if $p.Auto}}<input type="hidden" name="auto" value="1">{{end}}
+  <div><label for="q">Search</label><input type="search" id="q" name="q" value="{{$p.Q}}" maxlength="200" placeholder="all words must match"></div>
+  <div><label for="status">Status</label><select id="status" name="status">
+    <option value="">any</option>
+    <option value="new"{{if eq $p.Status "new"}} selected{{end}}>new</option>
+    <option value="read"{{if eq $p.Status "read"}} selected{{end}}>read</option>
+    <option value="filed"{{if eq $p.Status "filed"}} selected{{end}}>filed</option>
+  </select></div>
+  <div><label for="template">Template</label><select id="template" name="template">
+    <option value="">any</option>
+    {{range $v.Templates}}<option value="{{.ID}}"{{if eq .ID $p.Template}} selected{{end}}>{{.Name}}</option>{{end}}
+  </select></div>
+  {{if not $v.Sent}}
+  <div><label for="folder">Folder</label><select id="folder" name="folder">
+    <option value="">any</option>
+    {{range $v.Folders}}<option{{if eq . $p.Folder}} selected{{end}}>{{.}}</option>{{end}}
+  </select></div>
+  {{end}}
+  {{if $v.Requests}}
+  <div><label for="request">Request</label><select id="request" name="request">
+    <option value="">any</option>
+    {{range $v.Requests}}<option value="{{.ID}}"{{if eq .ID $p.Request}} selected{{end}}>{{.Subject}}</option>{{end}}
+  </select></div>
+  {{end}}
+  <div><label for="from">From date</label><input type="date" id="from" name="from" value="{{$p.From}}"></div>
+  <div><label for="to">To date</label><input type="date" id="to" name="to" value="{{$p.To}}"></div>
+  <div class="actions"><button>Filter</button>{{if $v.Filtered}} <a href="{{$v.Base}}{{if $p.Group}}?group={{$p.Group}}{{end}}">Clear</a>{{end}}</div>
+</form>
+
+<form method="post" action="/queue/bulk">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<input type="hidden" name="return" value="{{$v.Return}}">
+{{if not $v.Sent}}
+<div class="bulk">
+  <label class="inline" for="action">With selected:</label>
+  <select id="action" name="action">
+    <option value="">– action –</option>
+    <option value="read">mark as read</option>
+    <option value="new">mark as new</option>
+    <option value="file">file in folder →</option>
+  </select>
+  <input type="text" name="folder" maxlength="60" list="folders" placeholder="folder name" aria-label="Folder name">
+  <datalist id="folders">{{range $v.Folders}}<option value="{{.}}">{{end}}</datalist>
+  <button>Apply</button>
+  <span class="muted">{{if $v.Total}}{{$v.First}}–{{$v.Last}} of {{$v.Total}}{{else}}0 reports{{end}}</span>
+  <a href="{{$v.AutoURL}}">Auto-refresh: {{if $p.Auto}}on{{else}}off{{end}}</a>
+</div>
+{{end}}
+<div class="scroll"><table>
+  <thead><tr>
+    {{if not $v.Sent}}<th><span class="help">Sel.</span></th>{{end}}
+    {{range $v.Sorts}}<th><a href="{{.URL}}">{{if and $v.Sent (eq .Label "From")}}From{{else}}{{.Label}}{{end}} {{.Arrow}}</a></th>{{end}}
+    {{if $v.Sent}}<th>To</th>{{end}}
+    <th>Template</th>
+  </tr></thead>
+  <tbody>
+  {{range $v.Rows}}
+  <tr{{if eq .Status "new"}} class="new"{{end}}>
+    {{if not $v.Sent}}<td><input type="checkbox" name="id" value="{{.ID}}" aria-label="Select report"></td>{{end}}
+    <td>{{ts .Timestamp}}</td>
+    <td><a href="/reports/{{.ID}}">{{.Subject}}</a></td>
+    <td>{{.SenderName}}</td>
+    <td><span class="tag {{.Status}}">{{.Status}}</span></td>
+    <td>{{.Folder}}</td>
+    {{if $v.Sent}}<td>{{.ReceiverName}}</td>{{end}}
+    <td>{{.TemplateName}}</td>
+  </tr>
+  {{else}}
+  <tr><td colspan="8" class="muted">No reports{{if $v.Filtered}} match the filter{{end}}.</td></tr>
+  {{end}}
+  </tbody>
+</table></div>
+</form>
+<div class="pager">
+  {{if $v.PrevURL}}<a href="{{$v.PrevURL}}">← Newer page</a>{{end}}
+  {{if $v.NextURL}}<a href="{{$v.NextURL}}">Next page →</a>{{end}}
+</div>
+</div>
+</div>
+{{end}}

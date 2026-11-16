@@ -1,0 +1,70 @@
+policy_module(gr_report, 1.0.0)
+
+########################################
+# SELinux policy module for gr_report (reference policy / Fedora, RHEL,
+# Debian). Build and install with `make install-selinux`.
+#
+# The domain may: read its configuration and TLS key, manage its data
+# directory, and accept TCP connections on its port. It may not execute
+# programs, connect out, or touch anything else.
+########################################
+
+type gr_report_t;
+type gr_report_exec_t;
+init_daemon_domain(gr_report_t, gr_report_exec_t)
+
+type gr_report_etc_t;
+files_config_file(gr_report_etc_t)
+
+type gr_report_var_lib_t;
+files_type(gr_report_var_lib_t)
+
+type gr_report_port_t;
+corenet_port(gr_report_port_t)
+
+## <desc>
+## <p>
+## Allow gr_report to listen on privileged HTTP(S) ports such as 443.
+## </p>
+## </desc>
+gen_tunable(gr_report_bind_low_ports, false)
+
+########################################
+# Local policy
+#
+
+# RLIMIT_CORE=0, dropping capabilities, no_new_privs inside the process.
+allow gr_report_t self:process { setrlimit setcap getcap signal };
+allow gr_report_t self:fifo_file rw_fifo_file_perms;
+
+# Configuration and TLS material: read-only.
+list_dirs_pattern(gr_report_t, gr_report_etc_t, gr_report_etc_t)
+read_files_pattern(gr_report_t, gr_report_etc_t, gr_report_etc_t)
+read_lnk_files_pattern(gr_report_t, gr_report_etc_t, gr_report_etc_t)
+files_search_etc(gr_report_t)
+
+# Data directory: journal, lock, initial admin password.
+manage_dirs_pattern(gr_report_t, gr_report_var_lib_t, gr_report_var_lib_t)
+manage_files_pattern(gr_report_t, gr_report_var_lib_t, gr_report_var_lib_t)
+allow gr_report_t gr_report_var_lib_t:file lock;
+files_var_lib_filetrans(gr_report_t, gr_report_var_lib_t, dir)
+files_search_var_lib(gr_report_t)
+
+# TCP server on its own port type. 8443 is labelled http_port_t in most
+# distributions, so unprivileged ports of that type are allowed as well.
+allow gr_report_t self:tcp_socket { create_stream_socket_perms accept listen };
+allow gr_report_t gr_report_port_t:tcp_socket name_bind;
+corenet_tcp_bind_generic_node(gr_report_t)
+corenet_tcp_bind_http_port(gr_report_t)
+
+tunable_policy(`gr_report_bind_low_ports',`
+	allow gr_report_t self:capability net_bind_service;
+')
+
+# Go runtime: /proc/self, transparent huge page size, entropy.
+kernel_read_system_state(gr_report_t)
+dev_read_sysfs(gr_report_t)
+dev_read_urand(gr_report_t)
+
+# Log to the journal through the stderr stream inherited from systemd.
+logging_send_syslog_msg(gr_report_t)

@@ -1,0 +1,50 @@
+# AppArmor profile for gr_report.
+#
+#   install -m 0644 deploy/apparmor/usr.local.bin.gr_report /etc/apparmor.d/
+#   apparmor_parser -r /etc/apparmor.d/usr.local.bin.gr_report
+#
+# The profile allows what the server needs and nothing else: no program
+# execution, no access outside its data and configuration directories, TCP
+# sockets only.
+abi <abi/3.0>,
+
+include <tunables/global>
+
+profile gr_report /usr/{local/,}bin/gr_report flags=(attach_disconnected) {
+  include <abstractions/base>
+
+  # The binary is static; no shared libraries, no child processes.
+  /usr/{local/,}bin/gr_report mr,
+
+  # Configuration and TLS material: read-only.
+  /etc/gr_report/ r,
+  /etc/gr_report/** r,
+
+  # Data directory: journal, lock file, initial admin password.
+  owner /var/lib/gr_report/ rw,
+  owner /var/lib/gr_report/** rwk,
+
+  # Go runtime probes.
+  /sys/kernel/mm/transparent_hugepage/hpage_pmd_size r,
+  owner @{PROC}/@{pid}/cgroup r,
+  owner @{PROC}/@{pid}/maps r,
+
+  # TCP over IPv4/IPv6 only.
+  network inet stream,
+  network inet6 stream,
+  deny network inet dgram,
+  deny network inet6 dgram,
+  deny network raw,
+  deny network packet,
+  deny network netlink,
+
+  # Only needed (and only granted by systemd) for ports below 1024.
+  capability net_bind_service,
+
+  signal (receive) peer=unconfined,
+
+  deny /etc/shadow r,
+  deny /etc/gshadow r,
+  deny @{PROC}/sys/kernel/** w,
+  deny /sys/** w,
+}

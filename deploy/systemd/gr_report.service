@@ -1,0 +1,73 @@
+# systemd unit for gr_report. Install with `make install`.
+# Configuration lives in /etc/gr_report/gr_report.env.
+#
+# The directives below are the outer sandbox; the process additionally
+# confines itself with Landlock and seccomp after start-up (docs/security.md).
+[Unit]
+Description=gr_report - exercise reporting tool
+Documentation=https://github.com/rom/gr_report/tree/main/docs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=gr_report
+Group=gr_report
+EnvironmentFile=/etc/gr_report/gr_report.env
+ExecStart=/usr/local/bin/gr_report
+# SIGHUP re-reads the TLS certificate without dropping connections.
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=20s
+
+# /var/lib/gr_report, created and owned by the service user.
+StateDirectory=gr_report
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/gr_report
+UMask=0077
+
+# --- privileges -----------------------------------------------------------
+NoNewPrivileges=yes
+# No capabilities at all. To listen on a port below 1024 see
+# deploy/systemd/low-port.conf.
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateUsers=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+# --- file system ----------------------------------------------------------
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RemoveIPC=yes
+
+# --- kernel attack surface ------------------------------------------------
+RestrictNamespaces=yes
+RestrictRealtime=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+SystemCallArchitectures=native
+# Allow-list; @sandbox is needed for Landlock and seccomp inside the process.
+SystemCallFilter=@system-service @sandbox
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+
+# --- resources ------------------------------------------------------------
+LimitCORE=0
+LimitNOFILE=4096
+TasksMax=128
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

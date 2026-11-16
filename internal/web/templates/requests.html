@@ -1,0 +1,21 @@
+{{define "content"}}
+<h1>Requests</h1>
+{{if eq .User.Role "leader"}}<p><a class="button" href="/requests/new">New request</a></p>{{end}}
+<div class="scroll"><table>
+  <thead><tr><th>Sent</th><th>Subject</th><th>Template</th><th>Responses</th><th>State</th>{{if eq .User.Role "group"}}<th></th>{{end}}</tr></thead>
+  <tbody>
+  {{range .Data}}
+  <tr>
+    <td>{{ts .Req.Created}}</td>
+    <td><a href="/requests/{{.Req.ID}}">{{.Req.Subject}}</a></td>
+    <td>{{.TemplateName}}</td>
+    <td>{{.Responses}}</td>
+    <td>{{if .Req.Closed}}<span class="tag">closed</span>{{else}}<span class="tag filed">open</span>{{end}}</td>
+    {{if eq $.User.Role "group"}}<td>{{if not .Req.Closed}}<a href="/reports/new?request={{.Req.ID}}">Answer</a>{{end}}</td>{{end}}
+  </tr>
+  {{else}}
+  <tr><td colspan="6" class="muted">No requests.</td></tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{end}}

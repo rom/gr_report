@@ -1,0 +1,10 @@
+{{define "content"}}
+<h1>gr_report</h1>
+<form class="panel" method="post" action="/login">
+  <label for="username">Username</label>
+  <input type="text" id="username" name="username" value="{{.Data}}" autocomplete="username" autocapitalize="none" required autofocus>
+  <label for="password">Password</label>
+  <input type="password" id="password" name="password" autocomplete="current-password" required>
+  <div class="actions"><button>Log in</button></div>
+</form>
+{{end}}

@@ -1,0 +1,47 @@
+{{define "content"}}
+<h1>{{.User.DisplayName}}</h1>
+<div class="cols">
+<section class="panel">
+  <h2>Write a report</h2>
+  {{if .Data.Templates}}
+  <form method="get" action="/reports/new">
+    <label for="template">Report template</label>
+    <select id="template" name="template">
+      {{range .Data.Templates}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+    </select>
+    <div class="actions"><button>Start report</button></div>
+  </form>
+  {{else}}<p class="muted">No report templates are available yet.</p>{{end}}
+</section>
+<section class="panel">
+  <h2>Open requests from the exercise leader</h2>
+  {{if .Data.Requests}}
+  <table>
+    <thead><tr><th>Received</th><th>Subject</th><th>Answered</th><th></th></tr></thead>
+    <tbody>
+    {{range .Data.Requests}}
+    <tr{{if not .Responses}} class="new"{{end}}>
+      <td>{{ts .Req.Created}}</td>
+      <td><a href="/requests/{{.Req.ID}}">{{.Req.Subject}}</a></td>
+      <td>{{if .Responses}}yes ({{.Responses}}){{else}}<span class="tag new">no</span>{{end}}</td>
+      <td><a href="/reports/new?request={{.Req.ID}}">Answer</a></td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}<p class="muted">No open requests.</p>{{end}}
+</section>
+</div>
+<h2>Recently sent</h2>
+{{if .Data.Recent}}
+<div class="scroll"><table>
+  <thead><tr><th>Time</th><th>Subject</th><th>To</th><th>Template</th></tr></thead>
+  <tbody>
+  {{range .Data.Recent}}
+  <tr><td>{{ts .Timestamp}}</td><td><a href="/reports/{{.ID}}">{{.Subject}}</a></td><td>{{.ReceiverName}}</td><td>{{.TemplateName}}</td></tr>
+  {{end}}
+  </tbody>
+</table></div>
+<p><a href="/sent">All sent reports</a></p>
+{{else}}<p class="muted">Nothing sent yet.</p>{{end}}
+{{end}}

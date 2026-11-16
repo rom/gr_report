@@ -1,0 +1,21 @@
+## <summary>gr_report - exercise reporting tool.</summary>
+
+########################################
+## <summary>
+##	Read gr_report configuration and TLS files.
+## </summary>
+## <param name="domain">
+##	<summary>
+##	Domain allowed access.
+##	</summary>
+## </param>
+#
+interface(`gr_report_read_config',`
+	gen_require(`
+		type gr_report_etc_t;
+	')
+
+	files_search_etc($1)
+	list_dirs_pattern($1, gr_report_etc_t, gr_report_etc_t)
+	read_files_pattern($1, gr_report_etc_t, gr_report_etc_t)
+')

@@ -1,0 +1,46 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>Accounts</h1>
+<form class="panel" method="post" action="/admin/users">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <h2>New account</h2>
+  <div class="filters">
+    <div><label for="username">Username</label><input type="text" id="username" name="username" value="{{$d.Form.Username}}" maxlength="32" autocapitalize="none" required></div>
+    <div><label for="display_name">Display name</label><input type="text" id="display_name" name="display_name" value="{{$d.Form.DisplayName}}" maxlength="80" required></div>
+    <div><label for="role">Role</label><select id="role" name="role">
+      {{range $d.Roles}}<option{{if eq . $d.Form.Role}} selected{{end}}>{{.}}</option>{{end}}
+    </select></div>
+    <div class="actions"><button>Create</button></div>
+  </div>
+  <p class="help">A <strong>group</strong> account is shared by one participating group (or person). A one-time password is generated and shown once.</p>
+</form>
+<div class="scroll"><table>
+  <thead><tr><th>Username</th><th>Display name</th><th>Role</th><th>State</th><th>Actions</th></tr></thead>
+  <tbody>
+  {{range $d.Users}}
+  <tr>
+    <td>{{.Username}}</td>
+    <td>
+      <form class="bulk" method="post" action="/admin/users/{{.ID}}">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <input type="text" name="display_name" value="{{.DisplayName}}" maxlength="80" aria-label="Display name">
+        <button class="link" name="action" value="rename">Rename</button>
+      </form>
+    </td>
+    <td>{{.Role}}</td>
+    <td>{{if .Disabled}}<span class="tag new">disabled</span>{{else if .MustChange}}<span class="tag">one-time password</span>{{else}}<span class="tag filed">active</span>{{end}}</td>
+    <td>
+      {{if ne .ID $d.Self}}
+      <form class="inlineform" method="post" action="/admin/users/{{.ID}}">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <button class="link" name="action" value="reset">Reset password</button> ·
+        {{if .Disabled}}<button class="link" name="action" value="enable">Enable</button>
+        {{else}}<button class="link" name="action" value="disable">Disable</button>{{end}}
+      </form>
+      {{else}}<span class="muted">you</span>{{end}}
+    </td>
+  </tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{end}}
