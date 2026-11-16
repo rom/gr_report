@@ -5,7 +5,7 @@
 # confines itself with Landlock and seccomp after start-up (docs/security.md).
 [Unit]
 Description=gr_report - exercise reporting tool
-Documentation=https://github.com/rom/gr_report/tree/main/docs
+Documentation=https://github.com/rom/gr_report/tree/rom/docs
 After=network-online.target
 Wants=network-online.target
 
