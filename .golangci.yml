@@ -13,6 +13,7 @@ linters:
         - (*database/sql.DB).Close
         - os.Remove
         - fmt.Fprintln
+        - fmt.Fprint
   exclusions:
     rules:
       - path: _test\.go

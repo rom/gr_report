@@ -32,6 +32,7 @@ Third-party modules are allowed when they earn their place. Rules:
 | --- | --- | --- |
 | `modernc.org/sqlite` | `internal/store` | SQLite without cgo (a mechanical translation of the C sources to Go) |
 | `golang.org/x/crypto/argon2` | `internal/auth` | Argon2id password hashing ([ADR 0015](0015-argon2id.md)) |
+| `go.yaml.in/yaml/v3` | `internal/app` | Configuration file ([ADR 0018](0018-yaml-configuration.md)) |
 | `golang.org/x/net/html` | tests only | HTML parser for the accessibility audit |
 
 Everything else in `go.mod` is an indirect dependency of the SQLite driver.

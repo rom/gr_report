@@ -50,7 +50,8 @@ internal/store/       SQLite storage and migrations
 internal/model/       entities, validation, filter, sort
 internal/sandbox/     Landlock, seccomp, capabilities (Linux), no-op elsewhere
 scripts/              certificates, coverage gate, fuzz runner
-deploy/systemd/       unit, drop-in, env file, sysusers, tmpfiles
+deploy/gr_report.yaml the configuration file installed to /etc/gr_report
+deploy/systemd/       unit, drop-in, sysusers, tmpfiles
 deploy/selinux/       policy module
 deploy/apparmor/      profile
 docs/                 documentation, ADRs
@@ -87,6 +88,15 @@ docs/                 documentation, ADRs
 2. Validate it in `model.FillReport`.
 3. Render it in `internal/web/templates/report_new.html`.
 4. Extend `TestFillReport` and the `sitrep()` fixture used by the fuzzers.
+
+## Adding a setting
+
+1. Add the key to `FileConfig` and the field to `Config` in
+   `internal/app/config.go`, resolve it in `ParseConfig` (flag, environment
+   variable, file, default) and render it in `Config.YAML`.
+2. Add it, with a comment and its default, to `deploy/gr_report.yaml`;
+   `TestShippedConfigFile` fails while a setting is missing there.
+3. Document it in the table in [operations.md](operations.md).
 
 ## Adding a text
 

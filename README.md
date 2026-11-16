@@ -61,8 +61,9 @@ sudo sh scripts/mkcert-selfsigned.sh -o /etc/gr_report/tls -n report.example.org
 sudo systemctl enable --now gr_report
 ```
 
-See [docs/operations.md](docs/operations.md) for Let's Encrypt, ports,
-SELinux/AppArmor and backup.
+All settings are in `/etc/gr_report/gr_report.yaml`. See
+[docs/operations.md](docs/operations.md) for the settings, Let's Encrypt,
+ports, SELinux/AppArmor and backup.
 
 ## Documentation
 

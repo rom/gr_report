@@ -30,7 +30,8 @@
 | Resource exhaustion | Request body limit 256 KiB, header limit 32 KiB, read/write/idle time-outs, field length limits, bounded session and throttle tables, `MemoryMax`/`TasksMax` in the unit |
 | Corrupt stored data | SQLite integrity check at start; `STRICT` tables; a file that is not a database is refused, never overwritten; a damaged row fails loudly instead of being shown half-read |
 | Remote code execution in the server | Memory-safe language, no cgo and no C library in the process, and the sandbox layers below |
-| Supply-chain compromise | Two runtime dependencies (the pure-Go SQLite driver and `golang.org/x/crypto`) with pinned, checksummed versions ([ADR 0010](adr/0010-vetted-dependencies.md)); the web interface has no third-party script, style or font |
+| Misconfiguration going unnoticed | The configuration file is parsed strictly: an unknown, misspelt or mistyped setting stops the start instead of silently falling back to a default; `-print-config` shows what is in effect |
+| Supply-chain compromise | Three runtime dependencies (the pure-Go SQLite driver, `golang.org/x/crypto` and a YAML parser) with pinned, checksummed versions ([ADR 0010](adr/0010-vetted-dependencies.md)); the web interface has no third-party script, style or font |
 
 Out of scope: a malicious administrator or root user on the server, denial
 of service by flooding the network, and compromised participant devices.
@@ -119,7 +120,7 @@ Modes (`-sandbox`):
 * `auto` (default) – apply everything the kernel supports and log what is
   missing.
 * `strict` – refuse to start unless every mechanism is active. This is the
-  setting in the shipped `gr_report.env`.
+  setting in the shipped `gr_report.yaml`.
 * `off` – development only.
 
 On macOS there is no in-process sandbox; the server logs that fact and

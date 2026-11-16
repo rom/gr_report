@@ -237,9 +237,14 @@ capability drop are skipped and reported, seccomp still applies.
 
 ## internal/app
 
-* `ParseConfig` – flags with environment defaults; rejects running without
-  TLS unless `-insecure-http`, `-dev-seed` without `-insecure-http`, and an
-  unsupported `-lang`.
+* `ParseConfig` – resolves every setting as built-in default < YAML file
+  (`-config`, parsed strictly into `FileConfig`, whose pointer fields tell
+  "absent" from "zero") < environment < flag (`flag.Visit` tells which
+  flags were given). Relative paths from the file are joined to the file's
+  directory. It rejects running without TLS unless insecure HTTP is on,
+  demo accounts without insecure HTTP, and unsupported values.
+* `Config.YAML` – renders the effective configuration in the file format
+  (`-print-config`); a test checks that it parses back to the same.
 * `Bootstrap` – starter templates (in the default language) when there are
   none; when there are no
   users, the `admin` account with a random one-time password written to

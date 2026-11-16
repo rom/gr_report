@@ -28,9 +28,9 @@ per-package and total statement coverage and **fails below 85 %**
 | `internal/i18n` | Unit + source scan | Translation, fallback, nested messages, `Accept-Language` matching; **every message used in the code has a Swedish translation, none is unused, format verbs match** |
 | `internal/auth` | Unit with fake clock | Argon2id hash format, the reference test vector, parameter bounds, PBKDF2 compatibility and rehash decision, concurrency limit, policy, session idle/absolute expiry, eviction, flash, throttling back-off and bounds |
 | `internal/web` | Integration over HTTP (`httptest`) with a real store | Login/logout, cookie attributes, security headers, throttling, CSRF and origin checks, role matrix for every route, object-level access, the full report / queue / request / template / account flows (also in Swedish), language and theme selection, chat (who can read what, unread counters, paging, polling, rate limit, switch-off; oversight: notice, per-message tag, not retroactive, read-only, live polling, off again), escaping of hostile input, body limit, stale sessions, write failure, read failure; **accessibility audit of every page**; **contrast ratios of every theme** |
-| `internal/app` | Integration | Flag and environment parsing, first-run bootstrap, HTTP and TLS serving, TLS minimum version, certificate reload (good and broken), start-up errors, graceful shutdown |
+| `internal/app` | Integration | Configuration file (strict parsing, precedence over defaults and under environment and flags, relative paths, round trip of the rendered configuration, the shipped file), flag and environment parsing, first-run bootstrap, HTTP and TLS serving, TLS minimum version, certificate reload (good and broken), start-up errors, graceful shutdown |
 | `internal/sandbox` | Unit + child process | BPF program against an interpreter; **enforcement**: a child applies the sandbox and tries exec, sockets, connect, ptrace, setuid, forbidden reads and writes; strict mode; in-process apply |
-| `cmd/gr_report` | Unit + end-to-end | Exit codes; builds the binary, runs it with TLS and the sandbox, logs in, writes, reloads the certificate with SIGHUP, shuts down with SIGTERM |
+| `cmd/gr_report` | Unit + end-to-end | Exit codes; builds the binary, runs it from a YAML configuration file with TLS and the sandbox, logs in, writes, reloads the certificate with SIGHUP, shuts down with SIGTERM |
 
 The role matrix in `TestRoleAccess` is the checklist for authorisation:
 every new route belongs in it.
@@ -45,6 +45,7 @@ every new route belongs in it.
 | `model.FuzzClean` | arbitrary bytes | output is valid UTF-8 without control characters; cleaning is idempotent |
 | `store.FuzzReportRoundTrip` | report text, search query | stored text comes back byte for byte; the SQL search agrees with the reference matcher; no input is interpreted as SQL |
 | `i18n.FuzzMatch` | `Accept-Language` header | no panic; always a supported language |
+| `app.FuzzConfigFile` | configuration file bytes | no panic; an accepted file renders and parses back to the same values |
 | `auth.FuzzVerify` | stored hash (Argon2id or PBKDF2), password | malformed hashes never verify; cost parameters beyond the bounds are never accepted |
 | `web.FuzzQueueParams` | query string | parameters are normalised and round-trip; generated links are safe |
 | `web.FuzzHandlers` | path, query, form body as leader and group | never a 5xx; never unescaped markup |

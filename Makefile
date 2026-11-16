@@ -114,9 +114,10 @@ lint: ## gofmt, go vet (Linux, arm64, macOS), golangci-lint and shellcheck when 
 	@if command -v shellcheck >/dev/null; then shellcheck scripts/*.sh; else echo "shellcheck not installed, skipped"; fi
 
 .PHONY: verify-deploy
-verify-deploy: ## Validate the systemd unit, AppArmor profile and SELinux module when the tools exist
+verify-deploy: build ## Validate the shipped config file, systemd unit, AppArmor profile and SELinux module
+	@./bin/$(BIN) -config deploy/gr_report.yaml -print-config >/dev/null && echo "deploy/gr_report.yaml OK"
 	@if command -v systemd-analyze >/dev/null; then \
-		tmp=$$(mktemp -d) && sed 's#^ExecStart=.*#ExecStart=/bin/true#; s#^EnvironmentFile=#EnvironmentFile=-#' deploy/systemd/gr_report.service > $$tmp/gr_report.service && \
+		tmp=$$(mktemp -d) && sed 's#^ExecStart=.*#ExecStart=/bin/true#' deploy/systemd/gr_report.service > $$tmp/gr_report.service && \
 		systemd-analyze verify $$tmp/gr_report.service && systemd-analyze security --offline=yes --threshold=20 $$tmp/gr_report.service | tail -1; rm -rf $$tmp; \
 	else echo "systemd-analyze not installed, skipped"; fi
 	@if command -v apparmor_parser >/dev/null; then apparmor_parser -Q -K deploy/apparmor/usr.local.bin.gr_report && echo "AppArmor profile OK"; else echo "apparmor_parser not installed, skipped"; fi
@@ -133,11 +134,11 @@ check: lint cover fuzz verify-deploy build-darwin ## Everything CI runs
 install: build ## Install binary, systemd unit, service user and default config
 	install -D -m 0755 bin/$(BIN) $(DESTDIR)$(PREFIX)/bin/$(BIN)
 	install -D -m 0644 deploy/systemd/gr_report.service $(DESTDIR)$(UNITDIR)/gr_report.service
-	sed -i 's#^ExecStart=.*#ExecStart=$(PREFIX)/bin/$(BIN)#' $(DESTDIR)$(UNITDIR)/gr_report.service
+	sed -i 's#^ExecStart=.*#ExecStart=$(PREFIX)/bin/$(BIN) -config $(SYSCONFDIR)/gr_report/gr_report.yaml#' $(DESTDIR)$(UNITDIR)/gr_report.service
 	install -D -m 0644 deploy/systemd/sysusers.conf $(DESTDIR)/usr/lib/sysusers.d/gr_report.conf
 	install -D -m 0644 deploy/systemd/tmpfiles.conf $(DESTDIR)/usr/lib/tmpfiles.d/gr_report.conf
-	test -e $(DESTDIR)$(SYSCONFDIR)/gr_report/gr_report.env || \
-		install -D -m 0644 deploy/systemd/gr_report.env $(DESTDIR)$(SYSCONFDIR)/gr_report/gr_report.env
+	test -e $(DESTDIR)$(SYSCONFDIR)/gr_report/gr_report.yaml || \
+		install -D -m 0644 deploy/gr_report.yaml $(DESTDIR)$(SYSCONFDIR)/gr_report/gr_report.yaml
 	@if [ -z "$(DESTDIR)" ] && command -v systemctl >/dev/null; then \
 		systemd-sysusers /usr/lib/sysusers.d/gr_report.conf && \
 		systemd-tmpfiles --create /usr/lib/tmpfiles.d/gr_report.conf && \

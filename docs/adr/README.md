@@ -23,6 +23,7 @@ changed decision gets a new record that supersedes the old one.
 | [0015](0015-argon2id.md) | Argon2id for password hashing, PBKDF2 hashes upgraded at login | Accepted |
 | [0016](0016-chat.md) | Chat: one shared conversation plus direct conversations between parties | Accepted; amended by 0017 |
 | [0017](0017-chat-oversight.md) | Leader oversight of group chat: off by default, announced, per message, forward-only | Accepted |
+| [0018](0018-yaml-configuration.md) | One YAML configuration file for all settings; environment and flags override | Accepted |
 
 Template for new records:
 
