@@ -1,0 +1,83 @@
+//go:build linux && amd64
+
+package sandbox
+
+// Generated from the kernel UAPI headers; see docs/security.md.
+
+const (
+	auditArch  = 0xC000003E // AUDIT_ARCH_X86_64
+	sysSeccomp = 317
+	rejectX32  = true
+)
+
+// deniedSyscalls maps the names of denied system calls to their numbers.
+var deniedSyscalls = map[string]uint32{
+	"execve":            59,
+	"execveat":          322,
+	"ptrace":            101,
+	"mount":             165,
+	"umount2":           166,
+	"pivot_root":        155,
+	"chroot":            161,
+	"swapon":            167,
+	"swapoff":           168,
+	"reboot":            169,
+	"kexec_load":        246,
+	"kexec_file_load":   320,
+	"init_module":       175,
+	"finit_module":      313,
+	"delete_module":     176,
+	"bpf":               321,
+	"perf_event_open":   298,
+	"userfaultfd":       323,
+	"process_vm_readv":  310,
+	"process_vm_writev": 311,
+	"setuid":            105,
+	"setgid":            106,
+	"setreuid":          113,
+	"setregid":          114,
+	"setresuid":         117,
+	"setresgid":         119,
+	"setgroups":         116,
+	"setfsuid":          122,
+	"setfsgid":          123,
+	"unshare":           272,
+	"setns":             308,
+	"keyctl":            250,
+	"add_key":           248,
+	"request_key":       249,
+	"open_by_handle_at": 304,
+	"name_to_handle_at": 303,
+	"acct":              163,
+	"quotactl":          179,
+	"settimeofday":      164,
+	"clock_settime":     227,
+	"adjtimex":          159,
+	"clock_adjtime":     305,
+	"sethostname":       170,
+	"setdomainname":     171,
+	"personality":       135,
+	"iopl":              172,
+	"ioperm":            173,
+	"mknod":             133,
+	"mknodat":           259,
+	"io_uring_setup":    425,
+	"io_uring_enter":    426,
+	"io_uring_register": 427,
+	"open_tree":         428,
+	"move_mount":        429,
+	"fsopen":            430,
+	"fsconfig":          431,
+	"fsmount":           432,
+	"fspick":            433,
+	"pidfd_getfd":       438,
+	"mount_setattr":     442,
+	"kcmp":              312,
+	"socket":            41,
+	"connect":           42,
+	"bind":              49,
+	"listen":            50,
+	"socketpair":        53,
+	"vhangup":           153,
+	"syslog":            103,
+}

@@ -1,0 +1,24 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>New request</h1>
+<p class="muted">Send a question or information request to the groups. They answer with the attached report template.</p>
+{{if not $d.Templates}}<p class="error">Create a <a href="/templates">report template</a> first.</p>{{end}}
+<form class="panel" method="post" action="/requests">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <label for="subject">Subject</label>
+  <input type="text" id="subject" name="subject" value="{{$d.Req.Subject}}" maxlength="200" required>
+  <label for="body">Question / information requested</label>
+  <textarea id="body" name="body" maxlength="20000">{{$d.Req.Body}}</textarea>
+  <label for="template">Report template for the answer</label>
+  <select id="template" name="template" required>
+    {{range $d.Templates}}<option value="{{.ID}}"{{if eq .ID $d.Req.TemplateID}} selected{{end}}>{{.Name}}</option>{{end}}
+  </select>
+  <label>Recipients</label>
+  <label class="inline"><input type="radio" name="to" value="all"{{if not $d.Req.Recipients}} checked{{end}}> All groups</label>
+  <label class="inline"><input type="radio" name="to" value="some"{{if $d.Req.Recipients}} checked{{end}}> Only selected groups:</label>
+  <div>
+  {{range $d.Groups}}<label class="inline"><input type="checkbox" name="recipient" value="{{.ID}}"{{if index $d.Selected .ID}} checked{{end}}> {{.DisplayName}}</label>{{end}}
+  </div>
+  <div class="actions"><button>Send request</button> <a href="/requests">Cancel</a></div>
+</form>
+{{end}}

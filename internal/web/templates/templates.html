@@ -1,0 +1,28 @@
+{{define "content"}}
+<h1>Report templates</h1>
+<p><a class="button" href="/templates/new">New template</a></p>
+<p class="muted">Every report always has a timestamp, sender, receiver, subject and content. A template adds guidance and extra fields.</p>
+<div class="scroll"><table>
+  <thead><tr><th>Name</th><th>Extra fields</th><th>Description</th><th>State</th><th></th></tr></thead>
+  <tbody>
+  {{range .Data}}
+  <tr>
+    <td><a href="/templates/{{.ID}}">{{.Name}}</a></td>
+    <td>{{len .Fields}}</td>
+    <td>{{.Description}}</td>
+    <td>{{if .Archived}}<span class="tag">archived</span>{{else}}<span class="tag filed">active</span>{{end}}</td>
+    <td>
+      <form class="inlineform" method="post" action="/templates/{{.ID}}/archive">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        {{if .Archived}}<button class="link" name="archived" value="0">Restore</button>
+        {{else}}<button class="link" name="archived" value="1">Archive</button>{{end}}
+      </form>
+      {{if and (eq $.User.Role "leader") (not .Archived)}} · <a href="/requests/new?template={{.ID}}">Send request</a>{{end}}
+    </td>
+  </tr>
+  {{else}}
+  <tr><td colspan="5" class="muted">No templates.</td></tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{end}}

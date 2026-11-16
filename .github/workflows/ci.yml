@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Lint
+        run: make lint
+      - name: Tests with coverage floor
+        run: make cover
+      - name: Race detector
+        run: make test-race
+      - name: Fuzz (short)
+        run: make fuzz FUZZTIME=10s
+      - name: Deployment files
+        run: make verify-deploy
+      - name: Cross-compile
+        run: make build-linux build-darwin
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build and test (development platform)
+        run: make build test

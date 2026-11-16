@@ -1,0 +1,4 @@
+/usr/local/bin/gr_report	--	gen_context(system_u:object_r:gr_report_exec_t,s0)
+/usr/bin/gr_report		--	gen_context(system_u:object_r:gr_report_exec_t,s0)
+/etc/gr_report(/.*)?			gen_context(system_u:object_r:gr_report_etc_t,s0)
+/var/lib/gr_report(/.*)?		gen_context(system_u:object_r:gr_report_var_lib_t,s0)

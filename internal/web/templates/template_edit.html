@@ -1,0 +1,35 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>{{.Title}}</h1>
+<form class="panel" method="post" action="/templates{{if not $d.New}}/{{$d.T.ID}}{{end}}">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <input type="hidden" name="rows" value="{{len $d.Rows}}">
+  <label for="name">Name</label>
+  <input type="text" id="name" name="name" value="{{$d.T.Name}}" maxlength="80" required>
+  <label for="description">Description / instructions <span class="help">shown above the report form</span></label>
+  <textarea id="description" name="description" maxlength="1000">{{$d.T.Description}}</textarea>
+  <label for="default_subject">Default subject</label>
+  <input type="text" id="default_subject" name="default_subject" value="{{$d.T.DefaultSubject}}" maxlength="200">
+  <label for="content_help">Hint for the content field</label>
+  <input type="text" id="content_help" name="content_help" value="{{$d.T.ContentHelp}}" maxlength="200">
+  <h2>Extra fields</h2>
+  <p class="help">Timestamp, sender, receiver, subject and content are always part of a report. Clear a label to remove a field. Options (comma separated) are used by the select type.</p>
+  <div class="fieldrow help"><span>Label</span><span>Type</span><span>Required</span><span>Options</span><span>Hint</span></div>
+  {{range $d.Rows}}
+  <div class="fieldrow">
+    <input type="hidden" name="f{{.I}}_key" value="{{.F.Key}}">
+    <input type="text" name="f{{.I}}_label" value="{{.F.Label}}" maxlength="80" aria-label="Label">
+    {{$t := .F.Type}}
+    <select name="f{{.I}}_type" aria-label="Type">{{range $d.Types}}<option{{if eq . $t}} selected{{end}}>{{.}}</option>{{end}}</select>
+    <input type="checkbox" name="f{{.I}}_req" value="1"{{if .F.Required}} checked{{end}} aria-label="Required">
+    <input type="text" name="f{{.I}}_opts" value="{{.Options}}" aria-label="Options" placeholder="a, b, c">
+    <input type="text" name="f{{.I}}_help" value="{{.F.Help}}" maxlength="200" aria-label="Hint">
+  </div>
+  {{end}}
+  <div class="actions">
+    <button>Save template</button>
+    <button class="plain" name="more" value="1">Save and add more fields</button>
+    <a href="/templates">Cancel</a>
+  </div>
+</form>
+{{end}}

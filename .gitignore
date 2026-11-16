@@ -1,0 +1,10 @@
+/bin/
+/dist/
+/data/
+/tls/
+/coverage.out
+/coverage.html
+/deploy/selinux/*.pp
+/deploy/selinux/tmp/
+# local fuzz cache is outside the tree; crashers found by `go test -fuzz`
+# land in testdata/fuzz and SHOULD be committed as regression tests.
