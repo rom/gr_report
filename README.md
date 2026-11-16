@@ -11,12 +11,20 @@ of people report to an exercise leader.
   attached for the answer.
 * The **administrator** or the exercise leader creates report templates. The
   administrator manages the accounts.
+* Groups and the exercise leader can **chat**: one conversation for
+  everyone, and direct conversations between two groups or between a group
+  and the exercise leader.
 
 Every report carries at least a timestamp, the sender, a subject, the
 content and the receiver.
 
-One static Go binary, no database, no JavaScript, no third-party
-dependencies. Linux is the target platform (systemd, Landlock, seccomp,
+* The interface is available in **English and Swedish**, follows
+  **WCAG 2.1 AA** practices, and comes with **themes**: light, dark, high
+  contrast, gold, spring, autumn, camouflage and console green.
+
+One static Go binary with an embedded SQLite database – no database server
+and no build step for the web interface, which works with or without
+JavaScript. Linux is the target platform (systemd, Landlock, seccomp,
 capabilities, SELinux, AppArmor); macOS works for development.
 
 ## Quick start (development)
@@ -53,14 +61,16 @@ sudo sh scripts/mkcert-selfsigned.sh -o /etc/gr_report/tls -n report.example.org
 sudo systemctl enable --now gr_report
 ```
 
-See [docs/operations.md](docs/operations.md) for Let's Encrypt, ports,
-SELinux/AppArmor and backup.
+All settings are in `/etc/gr_report/gr_report.yaml`. See
+[docs/operations.md](docs/operations.md) for the settings, Let's Encrypt,
+ports, SELinux/AppArmor and backup.
 
 ## Documentation
 
 | Document | Content |
 | --- | --- |
 | [docs/user-guide.md](docs/user-guide.md) | How groups, leaders and administrators use the tool |
+| [docs/accessibility.md](docs/accessibility.md) | Languages, themes, contrast and accessibility |
 | [docs/operations.md](docs/operations.md) | Installation, configuration, ports, TLS, backup |
 | [docs/security.md](docs/security.md) | Threat model and the security layers |
 | [docs/architecture.md](docs/architecture.md) | Architecture: context, components, data, runtime |
@@ -76,5 +86,7 @@ SELinux/AppArmor and backup.
 make check
 ```
 
-runs lint, the test suite with an 85 % coverage floor, all fuzz targets,
-validation of the deployment files and the macOS cross-build.
+runs lint, the test suite with an 85 % coverage floor (including the
+accessibility audit, the theme contrast check and the translation
+completeness check), all fuzz targets, validation of the deployment files
+and the macOS cross-build.

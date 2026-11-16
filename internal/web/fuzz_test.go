@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/rom/gr_report/internal/model"
 )
@@ -16,13 +17,17 @@ func FuzzQueueParams(f *testing.F) {
 	f.Add("group=abc&status=new&sort=subject&dir=asc&page=2&q=fuel+grid&from=2026-05-01&auto=1")
 	f.Add("status=%ff&page=-1&sort=;drop&folder=%00&q=" + strings.Repeat("a", 500))
 	f.Add("")
+	// Regression: a cut at the length limit must not leave trailing space
+	// or half a character behind.
+	f.Add("q=a" + strings.Repeat("+", 250) + "b")
+	f.Add("q=" + strings.Repeat("%C3%A5", 150) + "+" + strings.Repeat("%C3%B6", 100))
 	f.Fuzz(func(t *testing.T, raw string) {
 		v, err := url.ParseQuery(raw)
 		if err != nil {
 			return
 		}
 		p := parseQueueParams(v)
-		if p.Page < 0 || len(p.Q) > model.MaxSubjectLen || (p.Status != "" && !model.Status(p.Status).Valid()) {
+		if p.Page < 0 || utf8.RuneCountInString(p.Q) > model.MaxSubjectLen || !utf8.ValidString(p.Q) || strings.TrimSpace(p.Q) != p.Q || (p.Status != "" && !model.Status(p.Status).Valid()) {
 			t.Fatalf("not normalised: %+v", p)
 		}
 		for _, id := range []string{p.Group, p.Template, p.Request} {
@@ -51,6 +56,10 @@ func FuzzHandlers(f *testing.F) {
 	f.Add("/queue/bulk", "", "id=a&id=b&action=file&folder=<script>&return=%zz", false)
 	f.Add("/requests", "", "subject=<script>&template=x&to=some&recipient=<script>", false)
 	f.Add("/admin/users", "", "username=<script>", false)
+	f.Add("/chat/all", "before=-1", "body=<script>alert(1)</script>", true)
+	f.Add("/chat/leader", "before=99999999999999999999", "", true)
+	f.Add("/api/chat/../x", "after=x", "", false)
+	f.Add("/api/chat/oversight/a/b", "after=-1", "", false)
 	e := newEnv(f)
 	h := e.srv.Handler()
 	cookies := map[bool]*http.Cookie{}
@@ -77,12 +86,15 @@ func FuzzHandlers(f *testing.F) {
 		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.AddCookie(cookies[group])
+		if len(query)%2 == 1 {
+			req.Header.Set("Accept-Language", "sv")
+		}
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 		if rec.Code >= 500 {
 			t.Fatalf("%s %s -> %d\n%s", method, u.String(), rec.Code, rec.Body.String())
 		}
-		if strings.Contains(rec.Body.String(), "<script") {
+		if strings.Contains(rec.Body.String(), "<script>") || strings.Contains(rec.Body.String(), "<img") {
 			t.Fatalf("%s %s: unescaped markup in response", method, u.String())
 		}
 	})

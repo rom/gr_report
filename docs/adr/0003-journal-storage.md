@@ -1,6 +1,6 @@
 # 0003 – In-memory state with an append-only JSON journal
 
-* Status: Accepted
+* Status: Superseded by [0012](0012-sqlite-storage.md)
 * Date: 2026-11-16
 * ASRs: Q-2, Q-4, Q-5, Q-10
 

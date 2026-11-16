@@ -1,4 +1,4 @@
-policy_module(gr_report, 1.0.0)
+policy_module(gr_report, 1.1.0)
 
 ########################################
 # SELinux policy module for gr_report (reference policy / Fedora, RHEL,
@@ -43,10 +43,11 @@ read_files_pattern(gr_report_t, gr_report_etc_t, gr_report_etc_t)
 read_lnk_files_pattern(gr_report_t, gr_report_etc_t, gr_report_etc_t)
 files_search_etc(gr_report_t)
 
-# Data directory: journal, lock, initial admin password.
+# Data directory: SQLite database (with its -wal and -shm files, the latter
+# is memory mapped), lock, initial admin password.
 manage_dirs_pattern(gr_report_t, gr_report_var_lib_t, gr_report_var_lib_t)
 manage_files_pattern(gr_report_t, gr_report_var_lib_t, gr_report_var_lib_t)
-allow gr_report_t gr_report_var_lib_t:file lock;
+allow gr_report_t gr_report_var_lib_t:file { lock map };
 files_var_lib_filetrans(gr_report_t, gr_report_var_lib_t, dir)
 files_search_var_lib(gr_report_t)
 

@@ -6,24 +6,25 @@ import (
 	"strings"
 
 	"github.com/rom/gr_report/internal/auth"
+	"github.com/rom/gr_report/internal/i18n"
 	"github.com/rom/gr_report/internal/model"
 )
 
-func (s *Server) loginForm(w http.ResponseWriter, _ *http.Request) {
-	s.write(w, http.StatusOK, "login", &page{Title: "Log in"})
+func (s *Server) loginForm(c *reqCtx) {
+	c.authed = false // the login page never shows the navigation
+	s.render(c, http.StatusOK, "login", c.t("Log in"), "", "")
 }
 
-func (s *Server) login(w http.ResponseWriter, r *http.Request) {
-	if !s.parsePost(w, r) {
-		return
-	}
+func (s *Server) login(c *reqCtx) {
+	w, r := c.w, c.r
+	c.authed = false
 	username := strings.ToLower(strings.TrimSpace(r.PostForm.Get("username")))
 	password := r.PostForm.Get("password")
 	ip := clientIP(r)
 	userKey, ipKey := "u:"+username+"|"+ip, "ip:"+ip
 
 	deny := func(status int, msg string) {
-		s.write(w, status, "login", &page{Title: "Log in", Error: msg, Data: username})
+		s.render(c, status, "login", c.t("Log in"), username, c.t(msg))
 	}
 	for _, chk := range []struct {
 		l   *auth.Limiter
@@ -47,6 +48,21 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.UserLimiter.Reset(userKey)
+	// Upgrade hashes made with the previous scheme or weaker parameters
+	// while the password is at hand. Failing to store the new hash must
+	// not stop the login.
+	if s.Hasher.NeedsRehash(user.PassHash) {
+		if hash, err := s.Hasher.Hash(password); err != nil {
+			s.Log.Error("rehash", "user", user.Username, "err", err)
+		} else {
+			user.PassHash = hash
+			if err := s.Store.PutUser(user); err != nil {
+				s.Log.Error("rehash", "user", user.Username, "err", err)
+			} else {
+				s.Log.Info("audit", "event", "password_rehashed", "user", user.Username)
+			}
+		}
+	}
 	s.setCookie(w, s.Sessions.Create(user.ID), 0)
 	s.Log.Info("audit", "event", "login", "user", user.Username, "role", string(user.Role), "ip", ip)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -60,28 +76,28 @@ func (s *Server) logout(c *reqCtx) {
 }
 
 func (s *Server) passwordForm(c *reqCtx) {
-	s.render(c, http.StatusOK, "password", "Change password", nil, "")
+	s.render(c, http.StatusOK, "password", c.t("Change password"), nil, "")
 }
 
 func (s *Server) passwordChange(c *reqCtx) {
 	f := c.r.PostForm
 	bad := func(msg string) {
-		s.render(c, http.StatusUnprocessableEntity, "password", "Change password", nil, msg)
+		s.render(c, http.StatusUnprocessableEntity, "password", c.t("Change password"), nil, msg)
 	}
 	newPw := f.Get("new")
 	switch {
 	case !auth.Verify(c.user.PassHash, f.Get("current")):
-		bad("The current password is wrong.")
+		bad(c.t("The current password is wrong."))
 		return
 	case newPw != f.Get("confirm"):
-		bad("The new passwords do not match.")
+		bad(c.t("The new passwords do not match."))
 		return
 	case newPw == f.Get("current"):
-		bad("The new password must differ from the current one.")
+		bad(c.t("The new password must differ from the current one."))
 		return
 	}
 	if err := auth.CheckPolicy(newPw); err != nil {
-		bad(err.Error())
+		bad(i18n.TErr(c.lang, err))
 		return
 	}
 	hash, err := s.Hasher.Hash(newPw)
@@ -98,7 +114,7 @@ func (s *Server) passwordChange(c *reqCtx) {
 	c.token = s.Sessions.Create(u.ID)
 	s.setCookie(c.w, c.token, 0)
 	s.audit(c, "password_changed")
-	s.redirect(c, "/", "Password changed.")
+	s.redirect(c, "/", c.t("Password changed."))
 }
 
 // ---- administration of accounts ----
@@ -113,7 +129,7 @@ type usersView struct {
 func (s *Server) usersPage(c *reqCtx, status int, form model.User, errMsg string) {
 	v := &usersView{Users: s.Store.Users(), Self: c.user.ID, Form: form,
 		Roles: []model.Role{model.RoleGroup, model.RoleLeader, model.RoleAdmin}}
-	s.render(c, status, "users", "Accounts", v, errMsg)
+	s.render(c, status, "users", c.t("Accounts"), v, errMsg)
 }
 
 func (s *Server) users(c *reqCtx) {
@@ -125,11 +141,11 @@ func (s *Server) userCreate(c *reqCtx) {
 	u := model.User{ID: model.NewID(), Username: f.Get("username"), DisplayName: f.Get("display_name"),
 		Role: model.Role(f.Get("role")), MustChange: true, Created: s.Now().UTC()}
 	if err := u.Validate(); err != nil {
-		s.usersPage(c, http.StatusUnprocessableEntity, u, err.Error())
+		s.usersPage(c, http.StatusUnprocessableEntity, u, i18n.TErr(c.lang, err))
 		return
 	}
 	if _, exists := s.Store.UserByUsername(u.Username); exists {
-		s.usersPage(c, http.StatusUnprocessableEntity, u, "That username is already in use.")
+		s.usersPage(c, http.StatusUnprocessableEntity, u, c.t("That username is already in use."))
 		return
 	}
 	pw := auth.GeneratePassword()
@@ -142,13 +158,13 @@ func (s *Server) userCreate(c *reqCtx) {
 		return
 	}
 	s.audit(c, "user_created", "target", u.Username, "target_role", string(u.Role))
-	s.redirect(c, "/admin/users", fmt.Sprintf("Account %q created. One-time password: %s — hand it over now, it is not shown again.", u.Username, pw))
+	s.redirect(c, "/admin/users", c.t("Account %q created. One-time password: %s — hand it over now, it is not shown again.", u.Username, pw))
 }
 
 func (s *Server) userUpdate(c *reqCtx) {
 	u, ok := s.Store.User(c.r.PathValue("id"))
 	if !ok {
-		s.fail(c, http.StatusNotFound, "No such account.")
+		s.fail(c, http.StatusNotFound, c.t("No such account."))
 		return
 	}
 	flash := ""
@@ -156,7 +172,7 @@ func (s *Server) userUpdate(c *reqCtx) {
 	switch action {
 	case "reset":
 		if u.ID == c.user.ID {
-			s.fail(c, http.StatusUnprocessableEntity, "Use Change password for your own account.")
+			s.fail(c, http.StatusUnprocessableEntity, c.t("Use Change password for your own account."))
 			return
 		}
 		pw := auth.GeneratePassword()
@@ -165,23 +181,26 @@ func (s *Server) userUpdate(c *reqCtx) {
 			return
 		}
 		u.PassHash, u.MustChange = hash, true
-		flash = fmt.Sprintf("New one-time password for %q: %s — hand it over now, it is not shown again.", u.Username, pw)
+		flash = c.t("New one-time password for %q: %s — hand it over now, it is not shown again.", u.Username, pw)
 	case "disable", "enable":
 		if u.ID == c.user.ID {
-			s.fail(c, http.StatusUnprocessableEntity, "You cannot disable your own account.")
+			s.fail(c, http.StatusUnprocessableEntity, c.t("You cannot disable your own account."))
 			return
 		}
 		u.Disabled = action == "disable"
-		flash = fmt.Sprintf("Account %q %sd.", u.Username, action)
+		flash = c.t("Account %q enabled.", u.Username)
+		if u.Disabled {
+			flash = c.t("Account %q disabled.", u.Username)
+		}
 	case "rename":
 		u.DisplayName = c.r.PostForm.Get("display_name")
 		if err := u.Validate(); err != nil {
-			s.fail(c, http.StatusUnprocessableEntity, err.Error())
+			s.fail(c, http.StatusUnprocessableEntity, i18n.TErr(c.lang, err))
 			return
 		}
-		flash = fmt.Sprintf("Account %q renamed.", u.Username)
+		flash = c.t("Account %q renamed.", u.Username)
 	default:
-		s.fail(c, http.StatusBadRequest, "Unknown action.")
+		s.fail(c, http.StatusBadRequest, c.t("Unknown action."))
 		return
 	}
 	if s.storeErr(c, s.Store.PutUser(u)) {

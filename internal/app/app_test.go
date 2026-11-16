@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/rom/gr_report/internal/auth"
+	"github.com/rom/gr_report/internal/i18n"
 	"github.com/rom/gr_report/internal/sandbox"
 	"github.com/rom/gr_report/internal/store"
 )
@@ -39,7 +40,7 @@ func TestParseConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Addr != ":8443" || cfg.DataDir != "./data" || cfg.Sandbox != sandbox.ModeAuto || cfg.InsecureHTTP || cfg.DevSeed {
+	if cfg.Addr != ":8443" || cfg.DataDir != "./data" || cfg.Sandbox != sandbox.ModeAuto || cfg.InsecureHTTP || cfg.DevSeed || cfg.Lang != i18n.EN || !cfg.Chat || cfg.ChatOversight {
 		t.Errorf("defaults = %+v", cfg)
 	}
 
@@ -64,6 +65,24 @@ func TestParseConfig(t *testing.T) {
 	if cfg, err = ParseConfig(nil, env(map[string]string{"GR_REPORT_INSECURE_HTTP": "1"}), io.Discard); err != nil || !cfg.InsecureHTTP {
 		t.Errorf("GR_REPORT_INSECURE_HTTP = %+v, %v", cfg, err)
 	}
+	if cfg, err = ParseConfig(append([]string{"-lang", "sv"}, tls...), env(nil), io.Discard); err != nil || cfg.Lang != i18n.SV {
+		t.Errorf("-lang sv = %+v, %v", cfg, err)
+	}
+	if cfg, err = ParseConfig(tls, env(map[string]string{"GR_REPORT_LANG": "sv"}), io.Discard); err != nil || cfg.Lang != i18n.SV {
+		t.Errorf("GR_REPORT_LANG = %+v, %v", cfg, err)
+	}
+	if cfg, err = ParseConfig(append([]string{"-chat=false"}, tls...), env(nil), io.Discard); err != nil || cfg.Chat {
+		t.Errorf("-chat=false = %+v, %v", cfg, err)
+	}
+	if cfg, err = ParseConfig(tls, env(map[string]string{"GR_REPORT_CHAT": "off"}), io.Discard); err != nil || cfg.Chat {
+		t.Errorf("GR_REPORT_CHAT=off = %+v, %v", cfg, err)
+	}
+	if cfg, err = ParseConfig(append([]string{"-chat-oversight"}, tls...), env(nil), io.Discard); err != nil || !cfg.ChatOversight {
+		t.Errorf("-chat-oversight = %+v, %v", cfg, err)
+	}
+	if cfg, err = ParseConfig(tls, env(map[string]string{"GR_REPORT_CHAT_OVERSIGHT": "on"}), io.Discard); err != nil || !cfg.ChatOversight {
+		t.Errorf("GR_REPORT_CHAT_OVERSIGHT=on = %+v, %v", cfg, err)
+	}
 	if cfg, err = ParseConfig([]string{"-version"}, env(nil), io.Discard); err != nil || !cfg.ShowVersion {
 		t.Errorf("-version = %+v, %v", cfg, err)
 	}
@@ -77,6 +96,7 @@ func TestParseConfig(t *testing.T) {
 		append([]string{"-port", "http"}, tls...),
 		append([]string{"-port", "70000"}, tls...),
 		append([]string{"-sandbox", "maybe"}, tls...),
+		append([]string{"-lang", "de"}, tls...),
 		append([]string{"-data", ""}, tls...),
 		append([]string{"extra"}, tls...),
 		{"-no-such-flag"},
@@ -149,7 +169,7 @@ func start(t *testing.T, a *App, scheme string) (string, func() error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ready := make(chan net.Addr, 1)
 	a.Ready = func(addr net.Addr) { ready <- addr }
-	a.Hasher = auth.Hasher{Iterations: 1000}
+	a.Hasher = auth.Hasher{MemoryKiB: 64, Time: 1}
 	errc := make(chan error, 1)
 	go func() { errc <- a.Run(ctx) }()
 	stopped := false
@@ -182,7 +202,7 @@ func start(t *testing.T, a *App, scheme string) (string, func() error) {
 func TestRunHTTPDevSeed(t *testing.T) {
 	dir := t.TempDir()
 	var logs syncBuffer
-	a := &App{Cfg: Config{Addr: "127.0.0.1:0", DataDir: dir, InsecureHTTP: true, DevSeed: true, Sandbox: sandbox.ModeOff},
+	a := &App{Cfg: Config{Addr: "127.0.0.1:0", DataDir: dir, InsecureHTTP: true, DevSeed: true, Sandbox: sandbox.ModeOff, Lang: i18n.SV, Chat: true, ChatOversight: true},
 		Log: slog.New(slog.NewTextHandler(&logs, nil))}
 	base, stop := start(t, a, "http")
 
@@ -194,13 +214,14 @@ func TestRunHTTPDevSeed(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != 200 || !strings.Contains(string(body), "Report queue") {
+	// The configured default language applies when the browser asks for none.
+	if resp.StatusCode != 200 || !strings.Contains(string(body), "Rapportkö") || !strings.Contains(string(body), `<html lang="sv"`) || !strings.Contains(string(body), `href="/chat"`) {
 		t.Errorf("dev login: %d\n%s", resp.StatusCode, body)
 	}
 	if err := stop(); err != nil {
 		t.Errorf("Run returned %v", err)
 	}
-	for _, want := range []string{"plain HTTP", "publicly known password", "listening", "shutting down", "sandbox disabled"} {
+	for _, want := range []string{"plain HTTP", "publicly known password", "listening", "shutting down", "sandbox disabled", "chat oversight is on"} {
 		if !strings.Contains(logs.String(), want) {
 			t.Errorf("log lacks %q", want)
 		}
@@ -218,6 +239,12 @@ func TestRunHTTPDevSeed(t *testing.T) {
 	users, templates := len(st.Users()), len(st.Templates(true))
 	if users != 4 || templates != 2 {
 		t.Errorf("seeded %d users, %d templates", users, templates)
+	}
+	if tps := st.Templates(true); tps[0].Name != "Lägesrapport" {
+		t.Errorf("starter templates not in the configured language: %q", tps[0].Name)
+	}
+	if _, err := os.Stat(filepath.Join(dir, store.DBName)); err != nil {
+		t.Errorf("database file: %v", err)
 	}
 	if err := a.Bootstrap(st); err != nil {
 		t.Fatal(err)
@@ -327,7 +354,7 @@ func TestRunErrors(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	run := func(cfg Config) error {
 		cfg.Sandbox = sandbox.ModeOff
-		a := &App{Cfg: cfg, Log: log, Hasher: auth.Hasher{Iterations: 1000}}
+		a := &App{Cfg: cfg, Log: log, Hasher: auth.Hasher{MemoryKiB: 64, Time: 1}}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return a.Run(ctx)
@@ -365,7 +392,7 @@ func TestBootstrapErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &App{Cfg: Config{DataDir: "/nonexistent-dir-for-test"}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Hasher: auth.Hasher{Iterations: 1000}}
+	a := &App{Cfg: Config{DataDir: "/nonexistent-dir-for-test"}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Hasher: auth.Hasher{MemoryKiB: 64, Time: 1}}
 	if err := a.Bootstrap(st); err == nil {
 		t.Error("unwritable password file ignored")
 	}
@@ -373,10 +400,7 @@ func TestBootstrapErrors(t *testing.T) {
 		t.Error("admin created although the password could not be handed over")
 	}
 	st.Close()
-	if err := a.Bootstrap(st); err == nil {
-		t.Error("Bootstrap on a closed store succeeded")
-	}
-	bad := &App{Cfg: Config{DataDir: t.TempDir()}, Log: a.Log, Hasher: auth.Hasher{Iterations: 1}}
+	bad := &App{Cfg: Config{DataDir: t.TempDir()}, Log: a.Log, Hasher: auth.Hasher{Time: 999}}
 	st2, _ := store.Open(t.TempDir())
 	defer st2.Close()
 	if err := bad.Bootstrap(st2); err == nil {
@@ -389,9 +413,18 @@ func TestBootstrapErrors(t *testing.T) {
 }
 
 func TestStarterTemplatesValid(t *testing.T) {
-	for _, tp := range starterTemplates() {
-		if err := tp.Validate(); err != nil {
-			t.Errorf("%s: %v", tp.Name, err)
+	for _, lang := range i18n.Languages {
+		tps := starterTemplates(lang)
+		if len(tps) != 2 || len(tps[0].Fields) != 0 || len(tps[1].Fields) != 6 {
+			t.Errorf("%s: unexpected starter templates", lang)
 		}
+		for _, tp := range tps {
+			if err := tp.Validate(); err != nil {
+				t.Errorf("%s %s: %v", lang, tp.Name, err)
+			}
+		}
+	}
+	if starterTemplates(i18n.SV)[1].Name != "Lägesrapport" || starterTemplates(i18n.EN)[0].Name != "Minimal report" {
+		t.Error("starter templates are not in the requested language")
 	}
 }

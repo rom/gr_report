@@ -1,43 +1,43 @@
 {{define "content"}}
 {{$d := .Data}}
-<h1>Accounts</h1>
-<form class="panel" method="post" action="/admin/users">
+<h1 id="h-accounts">{{$.T "Accounts"}}</h1>
+<form class="panel" method="post" action="/admin/users"{{if .Error}} aria-describedby="error"{{end}}>
   <input type="hidden" name="csrf" value="{{.CSRF}}">
-  <h2>New account</h2>
+  <h2>{{$.T "New account"}}</h2>
   <div class="filters">
-    <div><label for="username">Username</label><input type="text" id="username" name="username" value="{{$d.Form.Username}}" maxlength="32" autocapitalize="none" required></div>
-    <div><label for="display_name">Display name</label><input type="text" id="display_name" name="display_name" value="{{$d.Form.DisplayName}}" maxlength="80" required></div>
-    <div><label for="role">Role</label><select id="role" name="role">
-      {{range $d.Roles}}<option{{if eq . $d.Form.Role}} selected{{end}}>{{.}}</option>{{end}}
+    <div><label for="username">{{$.T "Username"}}</label><input type="text" id="username" name="username" value="{{$d.Form.Username}}" maxlength="32" autocapitalize="none" spellcheck="false" autocomplete="off" required></div>
+    <div><label for="display_name">{{$.T "Display name"}}</label><input type="text" id="display_name" name="display_name" value="{{$d.Form.DisplayName}}" maxlength="80" autocomplete="off" required></div>
+    <div><label for="role">{{$.T "Role"}}</label><select id="role" name="role">
+      {{range $d.Roles}}<option value="{{.}}"{{if eq . $d.Form.Role}} selected{{end}}>{{$.Tr .}}</option>{{end}}
     </select></div>
-    <div class="actions"><button>Create</button></div>
+    <div class="actions"><button>{{$.T "Create"}}</button></div>
   </div>
-  <p class="help">A <strong>group</strong> account is shared by one participating group (or person). A one-time password is generated and shown once.</p>
+  <p class="help">{{$.T "A group account is shared by one participating group (or person). A one-time password is generated and shown once."}}</p>
 </form>
-<div class="scroll"><table>
-  <thead><tr><th>Username</th><th>Display name</th><th>Role</th><th>State</th><th>Actions</th></tr></thead>
+<div class="scroll"><table aria-labelledby="h-accounts">
+  <thead><tr><th scope="col">{{$.T "Username"}}</th><th scope="col">{{$.T "Display name"}}</th><th scope="col">{{$.T "Role"}}</th><th scope="col">{{$.T "State"}}</th><th scope="col">{{$.T "Actions"}}</th></tr></thead>
   <tbody>
   {{range $d.Users}}
   <tr>
-    <td>{{.Username}}</td>
+    <th scope="row">{{.Username}}</th>
     <td>
       <form class="bulk" method="post" action="/admin/users/{{.ID}}">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">
-        <input type="text" name="display_name" value="{{.DisplayName}}" maxlength="80" aria-label="Display name">
-        <button class="link" name="action" value="rename">Rename</button>
+        <input type="text" name="display_name" value="{{.DisplayName}}" maxlength="80" autocomplete="off" aria-label="{{$.T "Display name for %s" .Username}}">
+        <button class="link" name="action" value="rename" aria-label="{{$.T "Rename %s" .Username}}">{{$.T "Rename"}}</button>
       </form>
     </td>
-    <td>{{.Role}}</td>
-    <td>{{if .Disabled}}<span class="tag new">disabled</span>{{else if .MustChange}}<span class="tag">one-time password</span>{{else}}<span class="tag filed">active</span>{{end}}</td>
+    <td>{{$.Tr .Role}}</td>
+    <td>{{if .Disabled}}<span class="tag new">{{$.T "disabled"}}</span>{{else if .MustChange}}<span class="tag">{{$.T "one-time password"}}</span>{{else}}<span class="tag filed">{{$.T "active"}}</span>{{end}}</td>
     <td>
       {{if ne .ID $d.Self}}
       <form class="inlineform" method="post" action="/admin/users/{{.ID}}">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">
-        <button class="link" name="action" value="reset">Reset password</button> ·
-        {{if .Disabled}}<button class="link" name="action" value="enable">Enable</button>
-        {{else}}<button class="link" name="action" value="disable">Disable</button>{{end}}
+        <button class="link" name="action" value="reset" aria-label="{{$.T "Reset password for %s" .Username}}">{{$.T "Reset password"}}</button> ·
+        {{if .Disabled}}<button class="link" name="action" value="enable" aria-label="{{$.T "Enable %s" .Username}}">{{$.T "Enable"}}</button>
+        {{else}}<button class="link" name="action" value="disable" aria-label="{{$.T "Disable %s" .Username}}">{{$.T "Disable"}}</button>{{end}}
       </form>
-      {{else}}<span class="muted">you</span>{{end}}
+      {{else}}<span class="muted">{{$.T "you"}}</span>{{end}}
     </td>
   </tr>
   {{end}}

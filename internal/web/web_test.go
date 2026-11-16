@@ -1,6 +1,9 @@
 package web
 
 import (
+	"crypto/pbkdf2"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -31,8 +34,10 @@ func TestLoginLogoutAndHeaders(t *testing.T) {
 	if r.header.Get("Strict-Transport-Security") != "" {
 		t.Error("HSTS sent over plain HTTP")
 	}
-	if strings.Contains(csp, "unsafe") || strings.Contains(csp, "script-src") {
-		t.Error("CSP must not allow scripts")
+	// Scripts and styles only from the server itself, never inline.
+	if strings.Contains(csp, "unsafe") || strings.Contains(csp, "*") || strings.Contains(csp, "data:") ||
+		!strings.Contains(csp, "default-src 'none'") || !strings.Contains(csp, "script-src 'self';") {
+		t.Errorf("CSP too permissive: %s", csp)
 	}
 
 	c.postRaw("/login", url.Values{"username": {"leader"}, "password": {"wrong"}}, nil).
@@ -55,6 +60,63 @@ func TestLoginLogoutAndHeaders(t *testing.T) {
 	c.post("/logout").want(t, 200, `action="/login"`)
 	if got := c.get("/queue").path; got != "/login" {
 		t.Errorf("after logout /queue ended at %s", got)
+	}
+}
+
+// Accounts created before the switch to Argon2id keep working and are
+// upgraded transparently at the next login.
+func TestLegacyHashUpgradedAtLogin(t *testing.T) {
+	e := newEnv(t)
+	salt := []byte("0123456789abcdef")
+	key, err := pbkdf2.Key(sha256.New, "old-style-password", salt, 1000, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc := base64.RawStdEncoding
+	legacy := "pbkdf2-sha256$1000$" + enc.EncodeToString(salt) + "$" + enc.EncodeToString(key)
+	u, _ := e.st.User(e.id["alpha"])
+	u.PassHash = legacy
+	if err := e.st.PutUser(u); err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"username": {"alpha"}, "password": {"old-style-password"}}
+
+	// A wrong password changes nothing.
+	e.anon().postRaw("/login", url.Values{"username": {"alpha"}, "password": {"wrong"}}, nil).want(t, 401)
+	if u, _ := e.st.User(e.id["alpha"]); u.PassHash != legacy {
+		t.Fatal("hash changed by a failed login")
+	}
+
+	e.anon().postRaw("/login", form, nil).want(t, 200, "Group Alpha")
+	u, _ = e.st.User(e.id["alpha"])
+	if !strings.HasPrefix(u.PassHash, "$argon2id$v=19$m=64,t=1,p=1$") {
+		t.Fatalf("hash not upgraded: %q", u.PassHash)
+	}
+	if u.MustChange || u.Disabled || u.DisplayName != "Group Alpha" {
+		t.Errorf("upgrade changed other fields: %+v", u)
+	}
+	// The password still works and the hash is now stable.
+	upgraded := u.PassHash
+	e.anon().postRaw("/login", form, nil).want(t, 200, "Group Alpha")
+	if u, _ := e.st.User(e.id["alpha"]); u.PassHash != upgraded {
+		t.Error("an up-to-date hash was replaced again")
+	}
+
+	// Raising the cost later upgrades existing Argon2id hashes too.
+	e.srv.Hasher.Time = 2
+	e.anon().postRaw("/login", form, nil).want(t, 200)
+	if u, _ := e.st.User(e.id["alpha"]); !strings.Contains(u.PassHash, "t=2,") {
+		t.Errorf("hash not upgraded to the new cost: %q", u.PassHash)
+	}
+
+	// If the new hash cannot be stored or computed, the login still works.
+	e.srv.Hasher.Time = 3
+	e.breakWrites()
+	e.anon().postRaw("/login", form, nil).want(t, 200, "Group Alpha")
+	e.srv.Hasher.Time = 999
+	e.anon().postRaw("/login", form, nil).want(t, 200, "Group Alpha")
+	if u, _ := e.st.User(e.id["alpha"]); !strings.Contains(u.PassHash, "t=2,") {
+		t.Errorf("hash changed although the write failed: %q", u.PassHash)
 	}
 }
 
@@ -148,6 +210,8 @@ func TestRoleAccess(t *testing.T) {
 		{"/sent", 403, 403, 200},
 		{"/requests", 403, 200, 200},
 		{"/requests/new", 403, 200, 403},
+		{"/chat/all", 403, 200, 200},
+		{"/api/chat/all", 403, 200, 200},
 		{"/templates", 200, 200, 403},
 		{"/templates/new", 200, 200, 403},
 		{"/templates/" + e.id["SITREP"], 200, 200, 403},
@@ -172,7 +236,7 @@ func TestRoleAccess(t *testing.T) {
 	}{
 		{"/admin/users", "leader", 403}, {"/admin/users", "alpha", 403},
 		{"/templates", "alpha", 403}, {"/requests", "alpha", 403}, {"/requests", "admin", 403},
-		{"/reports", "leader", 403}, {"/reports", "admin", 403}, {"/queue/bulk", "admin", 403},
+		{"/reports", "leader", 403}, {"/reports", "admin", 403}, {"/queue/bulk", "admin", 403}, {"/chat/all", "admin", 403},
 		{"/templates/" + e.id["SITREP"] + "/archive", "alpha", 403},
 	}
 	for _, p := range posts {
@@ -557,6 +621,11 @@ func TestOutputEscaping(t *testing.T) {
 	leader.post("/reports/"+id+"/status", "action", "file", "folder", `"><script>f</script>`)
 	leader.post("/templates", "name", evil, "description", evil, "rows", "1", "f0_label", evil, "f0_type", "select", "f0_opts", evil)
 	leader.post("/requests", "subject", evil, "body", evil, "template", e.id["Minimal report"], "to", "all")
+	leader.post("/chat/all", "body", evil)
+	alpha.post("/chat/leader", "body", evil)
+	for _, c := range []*client{alpha, leader} {
+		c.get("/chat/all").want(t, 200, "&lt;script&gt;").wantNot(t, "<script>", "<img src=x")
+	}
 	for _, c := range []*client{alpha, leader} {
 		for _, p := range []string{"/queue", "/requests", "/reports/" + id, "/queue?q=" + url.QueryEscape(evil) + "&folder=" + url.QueryEscape(evil)} {
 			c.get(p).want(t, 200).wantNot(t, "<script>", "<img src=x")
@@ -600,29 +669,52 @@ func TestStaleSessions(t *testing.T) {
 	}
 }
 
-func TestStoreFailure(t *testing.T) {
+func TestWriteFailure(t *testing.T) {
 	e := newEnv(t)
 	alpha, leader, admin := e.login("alpha"), e.login("leader"), e.login("admin")
 	id := alpha.send("s", "c")
-	toks := map[*client]string{alpha: alpha.csrf(), leader: leader.csrf(), admin: admin.csrf()}
-	e.st.Close()
+	e.breakWrites()
 	post := func(c *client, path string, kv ...string) {
 		t.Helper()
-		form := url.Values{"csrf": {toks[c]}}
-		for i := 0; i+1 < len(kv); i += 2 {
-			form.Add(kv[i], kv[i+1])
-		}
-		c.postRaw(path, form, nil).want(t, 500, "could not be saved")
+		c.post(path, kv...).want(t, 500, "could not be saved")
 	}
-	post(alpha, "/reports", "template", e.id["Minimal report"], "subject", "s", "content", "c")
+	post(alpha, "/reports", "template", e.id["Minimal report"], "subject", "s2", "content", "c")
+	post(alpha, "/chat/all", "body", "hello")
 	post(alpha, "/password", "current", pw("alpha"), "new", "another-password", "confirm", "another-password")
 	post(leader, "/templates", "name", "x")
 	post(leader, "/templates/"+e.id["SITREP"]+"/archive", "archived", "1")
 	post(leader, "/requests", "subject", "s", "template", e.id["SITREP"], "to", "all")
 	post(admin, "/admin/users", "username", "delta", "display_name", "Delta", "role", "group")
 	post(admin, "/admin/users/"+e.id["alpha"], "action", "disable")
-	leader.get("/reports/"+id).want(t, 500)
-	leader.get("/queue").want(t, 200) // reading still works
+	post(admin, "/admin/users/"+e.id["alpha"], "action", "reset")
+	leader.get("/reports/"+id).want(t, 500) // marking it read is a write
+	// Nothing was half-applied and reading still works.
+	leader.get("/queue").want(t, 200, "1–1 of 1")
+	if n := len(e.st.Reports(nil)); n != 1 {
+		t.Errorf("%d reports after failed writes", n)
+	}
+	if rep, _ := e.st.Report(id); rep.Status != model.StatusNew {
+		t.Error("status changed although the write failed")
+	}
+	e.anon().postRaw("/login", url.Values{"username": {"alpha"}, "password": {pw("alpha")}}, nil).want(t, 200)
+}
+
+// A failed database read must give an error page, not a dropped connection
+// or a stack trace.
+func TestReadFailure(t *testing.T) {
+	e := newEnv(t)
+	leader := e.login("leader")
+	e.st.Close()
+	for _, lang := range []string{"en", "sv"} {
+		leader.hdr = map[string]string{"Accept-Language": lang}
+		r := leader.get("/queue").want(t, 500).wantNot(t, "goroutine", "store:", "panic")
+		want := map[string]string{"en": "Something went wrong on the server", "sv": "Något gick fel på servern"}[lang]
+		if !strings.Contains(r.body, want) || r.header.Get("Content-Security-Policy") == "" {
+			t.Errorf("%s: unexpected error page: %s", lang, r.body)
+		}
+	}
+	e.anon().get("/healthz").want(t, 200)
+	e.anon().get("/login").want(t, 200)
 }
 
 func TestClientIPAndOrigin(t *testing.T) {

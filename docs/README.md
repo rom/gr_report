@@ -2,7 +2,7 @@
 
 | Audience | Start here |
 | --- | --- |
-| Participants, exercise leader, administrator | [user-guide.md](user-guide.md) |
+| Participants, exercise leader, administrator | [user-guide.md](user-guide.md), [accessibility.md](accessibility.md) |
 | Whoever installs and runs the server | [operations.md](operations.md), [security.md](security.md) |
 | Developers | [development.md](development.md), [testing.md](testing.md) |
 | Architects / reviewers | [asr.md](asr.md), [architecture.md](architecture.md), [design.md](design.md), [adr/](adr/README.md) |

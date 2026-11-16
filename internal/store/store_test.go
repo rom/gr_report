@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -154,16 +153,13 @@ func TestUpdateReport(t *testing.T) {
 	}
 }
 
-func TestPersistenceAndCompaction(t *testing.T) {
+func TestPersistence(t *testing.T) {
 	dir := t.TempDir()
 	s := open(t, dir)
 	seed(t, s)
-	for i := 0; i < 20; i++ {
-		if _, err := s.UpdateReport("r1", func(r *model.Report) bool { r.Folder = strings.Repeat("f", i+1); return true }); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := s.UpdateReport("r1", func(r *model.Report) bool { r.Folder = "kept"; return true }); err != nil {
+		t.Fatal(err)
 	}
-	before, _ := os.Stat(filepath.Join(dir, journalName))
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -173,23 +169,31 @@ func TestPersistenceAndCompaction(t *testing.T) {
 	if err := s.PutTemplate(model.Template{ID: "t9"}); !errors.Is(err, ErrClosed) {
 		t.Errorf("write after close: %v", err)
 	}
+	if _, err := s.UpdateReport("r1", func(*model.Report) bool { return true }); !errors.Is(err, ErrClosed) {
+		t.Errorf("update after close: %v", err)
+	}
 
 	s2 := open(t, dir)
-	after, _ := os.Stat(filepath.Join(dir, journalName))
-	if after.Size() >= before.Size() {
-		t.Errorf("journal not compacted: %d -> %d", before.Size(), after.Size())
-	}
-	if after.Mode().Perm() != 0o600 {
-		t.Errorf("journal mode = %v", after.Mode().Perm())
+	if fi, err := os.Stat(filepath.Join(dir, DBName)); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("database file: %v %v", fi, err)
 	}
 	if len(s2.Users()) != 4 || len(s2.Templates(true)) != 3 || len(s2.Requests()) != 3 || len(s2.Reports(nil)) != 4 {
 		t.Error("state lost on reopen")
 	}
-	if r, _ := s2.Report("r1"); len(r.Folder) != 20 {
-		t.Errorf("last write lost: %q", r.Folder)
+	r, _ := s2.Report("r1")
+	if r.Folder != "kept" || len(r.Fields) != 1 || r.Fields[0].Value != "v" {
+		t.Errorf("report after reopen = %+v", r)
+	}
+	tp, _ := s2.Template("t2")
+	if len(tp.Fields) != 1 || tp.Fields[0].Options[0] != "a" {
+		t.Errorf("template after reopen = %+v", tp)
+	}
+	q, _ := s2.Request("q1")
+	if len(q.Recipients) != 1 || !q.Created.Equal(t0) || q.Created.Location() != time.UTC {
+		t.Errorf("request after reopen = %+v", q)
 	}
 	if u, ok := s2.UserByUsername("bravo"); !ok || u.ID != "g2" {
-		t.Error("username index not rebuilt")
+		t.Error("user lost")
 	}
 }
 
@@ -210,127 +214,389 @@ func TestOpenErrors(t *testing.T) {
 		t.Error("Open on a regular file succeeded")
 	}
 	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, journalName), 0o700); err != nil {
+	if err := os.Mkdir(filepath.Join(dir, DBName), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Open(dir); err == nil {
-		t.Error("Open with a directory as journal succeeded")
+		t.Error("Open with a directory as database succeeded")
 	}
-}
-
-func writeJournal(t *testing.T, content string) string {
-	t.Helper()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, journalName), []byte(content), 0o600); err != nil {
+	// A file that is not a database must not be silently replaced.
+	dir = t.TempDir()
+	garbage := strings.Repeat("this is not a database ", 100)
+	if err := os.WriteFile(filepath.Join(dir, DBName), []byte(garbage), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return dir
+	if _, err := Open(dir); err == nil {
+		t.Error("garbage database accepted")
+	}
+	if raw, _ := os.ReadFile(filepath.Join(dir, DBName)); string(raw) != garbage {
+		t.Error("garbage database was modified")
+	}
+	// The directory lock is released when Open fails.
+	if err := os.Remove(filepath.Join(dir, DBName)); err != nil {
+		t.Fatal(err)
+	}
+	open(t, dir)
 }
 
-const goodLine = `{"k":"template","v":{"id":"t1","name":"Minimal"}}` + "\n"
-
-func TestTornAndCorruptJournal(t *testing.T) {
-	// A torn final record (crash during write) is dropped.
-	for _, tail := range []string{`{"k":"report","v":{"id":"r1","subj`, `{"k":"report","v":{"id":"r1"}`, "\x00\x00\x00"} {
-		s := open(t, writeJournal(t, goodLine+"\n"+tail))
-		if len(s.Templates(true)) != 1 || len(s.Reports(nil)) != 0 {
-			t.Errorf("tail %q: unexpected state", tail)
-		}
+func TestSchemaVersion(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	var v int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) {
+		t.Fatalf("user_version = %d, %v", v, err)
 	}
-	// Damage in the middle is never ignored.
-	bad := []string{
-		"not json\n" + goodLine,
-		`{"k":"mystery","v":{}}` + "\n" + goodLine,
-		`{"k":"user","v":{"id":"u1"}}` + "\n" + goodLine,
-		`{"k":"user","v":[]}` + "\n" + goodLine,
-		`{"k":"template","v":{"id":"BAD"}}` + "\n" + goodLine,
-		`{"k":"template","v":7}` + "\n" + goodLine,
-		`{"k":"request","v":{"id":""}}` + "\n" + goodLine,
-		`{"k":"request","v":"x"}` + "\n" + goodLine,
-		`{"k":"report","v":{"id":"a/b"}}` + "\n" + goodLine,
-		`{"k":"report","v":true}` + "\n" + goodLine,
-		`{"k":"user","v":{"id":"u1","username":"a"}}` + "\n" + `{"k":"user","v":{"id":"u2","username":"a"}}` + "\n" + goodLine,
-		`{"k":"report","v":{"id":"r1","content":"` + strings.Repeat("x", maxLine) + `"}}` + "\n" + goodLine,
+	var mode, sync string
+	if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil || mode != "wal" {
+		t.Errorf("journal_mode = %q, %v", mode, err)
 	}
-	for i, content := range bad {
-		if _, err := Open(writeJournal(t, content)); err == nil {
-			t.Errorf("case %d: corrupt journal accepted", i)
-		}
+	if err := s.db.QueryRow("PRAGMA synchronous").Scan(&sync); err != nil || sync != "2" {
+		t.Errorf("synchronous = %q (want 2 = FULL), %v", sync, err)
 	}
-	// Rename of a user inside the journal keeps the index consistent.
-	s := open(t, writeJournal(t, `{"k":"user","v":{"id":"u1","username":"a"}}`+"\n"+`{"k":"user","v":{"id":"u1","username":"b"}}`+"\n"))
-	if _, ok := s.UserByUsername("a"); ok {
-		t.Error("stale username after replay")
+	// A database written by a newer version is refused, not downgraded.
+	if _, err := s.db.Exec("PRAGMA user_version = 999"); err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := s.UserByUsername("b"); !ok {
-		t.Error("renamed user missing after replay")
+	s.Close()
+	if _, err := Open(dir); err == nil || !strings.Contains(err.Error(), "newer") {
+		t.Errorf("newer schema: %v", err)
+	}
+	// A broken migration rolls back completely.
+	dir2 := t.TempDir()
+	saved := migrations
+	migrations = append(append([]string{}, saved...), "CREATE TABLE extra (id TEXT); THIS IS NOT SQL;")
+	_, err := Open(dir2)
+	migrations = saved
+	if err == nil {
+		t.Fatal("broken migration accepted")
+	}
+	s2 := open(t, dir2)
+	var n int
+	if err := s2.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name = 'extra'").Scan(&n); err != nil || n != 0 {
+		t.Errorf("failed migration left a table behind: %d, %v", n, err)
 	}
 }
 
-func TestRecordTooLong(t *testing.T) {
+func TestSearch(t *testing.T) {
 	s := open(t, t.TempDir())
-	if err := s.PutReport(model.Report{ID: "r1", Content: strings.Repeat("x", maxLine)}); err == nil {
-		t.Error("oversized record accepted")
-	}
-	if _, ok := s.Report("r1"); ok {
-		t.Error("failed write became visible")
-	}
-}
-
-func TestWriteFailureLeavesStateUntouched(t *testing.T) {
-	s := open(t, t.TempDir())
-	seed(t, s)
-	s.journal.Close() // simulate an I/O error on the journal
-	if err := s.PutUser(model.User{ID: "u7", Username: "new"}); err == nil {
-		t.Error("PutUser succeeded without journal")
-	}
-	if err := s.PutTemplate(model.Template{ID: "t7"}); err == nil {
-		t.Error("PutTemplate succeeded without journal")
-	}
-	if err := s.PutRequest(model.Request{ID: "q7"}); err == nil {
-		t.Error("PutRequest succeeded without journal")
-	}
-	if err := s.PutReport(model.Report{ID: "r7"}); err == nil {
-		t.Error("PutReport succeeded without journal")
-	}
-	if _, err := s.UpdateReport("r1", func(r *model.Report) bool { r.Folder = "x"; return true }); err == nil {
-		t.Error("UpdateReport succeeded without journal")
-	}
-	if _, ok := s.User("u7"); ok {
-		t.Error("user visible after failed write")
-	}
-	if r, _ := s.Report("r1"); r.Folder != "" {
-		t.Error("report changed after failed write")
-	}
-}
-
-// FuzzReplay feeds arbitrary bytes to the journal parser. It must never
-// panic, and whatever state it accepts must survive a compaction round trip.
-func FuzzReplay(f *testing.F) {
-	f.Add([]byte(goodLine))
-	f.Add([]byte(`{"k":"user","v":{"id":"u1","username":"a","role":"group"}}` + "\n" + `{"k":"report","v":{"id":"r1","status":"new"}}` + "\n"))
-	f.Add([]byte(`{"k":"request","v":{"id":"q1","recipients":["a"]}}` + "\n{"))
-	f.Add([]byte("\n\n\x00"))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		s := newStore()
-		if err := s.replay(bytes.NewReader(data)); err != nil {
-			return
+	put := func(id, subject, content, folder string, fields ...string) {
+		t.Helper()
+		r := model.Report{ID: id, Subject: subject, Content: content, Folder: folder, SenderName: "Grupp Örnen",
+			TemplateName: "Lägesrapport", ReceiverID: "leader", Status: model.StatusNew, Timestamp: t0}
+		for _, f := range fields {
+			r.Fields = append(r.Fields, model.FieldValue{Key: "k", Label: "L", Value: f})
 		}
-		dir := t.TempDir()
-		if err := s.compact(dir); err != nil {
-			t.Fatalf("compact: %v", err)
-		}
-		raw, err := os.ReadFile(filepath.Join(dir, journalName))
-		if err != nil {
+		if err := s.PutReport(r); err != nil {
 			t.Fatal(err)
 		}
-		s2 := newStore()
-		if err := s2.replay(bytes.NewReader(raw)); err != nil {
-			t.Fatalf("compacted journal does not replay: %v", err)
+	}
+	put("a", "Bron är AVSTÄNGD", "Behöver bränsle", "", "Ruta 7")
+	put("b", "100% klart", "under_score och back\\slash", "Logistik")
+	put("c", "Ankomst", "allt väl", "")
+	cases := map[string]string{
+		"avstängd": "a", "BRÄNSLE bron": "a", "ruta": "a", "örnen": "abc", "lägesrapport": "abc", "logistik": "b",
+		"100%": "b", "%": "b", "_": "b", "under_score": "b", `back\slash`: "b", "x%": "", "a_k": "",
+		"'; DROP TABLE reports; --": "", "nomatch": "", "": "abc",
+	}
+	for q, want := range cases {
+		got := ""
+		rs := s.Reports(&model.ReportFilter{Query: q})
+		model.SortReports(rs, model.SortTime, false)
+		for _, r := range rs {
+			got += r.ID
 		}
-		if len(s2.users) != len(s.users) || len(s2.byName) != len(s.byName) || len(s2.templates) != len(s.templates) ||
-			len(s2.requests) != len(s.requests) || len(s2.reports) != len(s.reports) {
-			t.Error("state changed by compaction round trip")
+		if got != want {
+			t.Errorf("search %q = %q, want %q", q, got, want)
+		}
+	}
+	// Filing changes what the folder search finds.
+	if _, err := s.UpdateReport("c", func(r *model.Report) bool { r.Folder = "Ärenden"; return true }); err != nil {
+		t.Fatal(err)
+	}
+	if rs := s.Reports(&model.ReportFilter{Query: "ärenden"}); len(rs) != 1 || rs[0].ID != "c" {
+		t.Errorf("folder not searchable after update: %+v", rs)
+	}
+	from, to := t0.Add(-time.Hour), t0.Add(time.Hour)
+	if rs := s.Reports(&model.ReportFilter{From: from, To: to, Status: model.StatusNew, Folder: "Logistik"}); len(rs) != 1 {
+		t.Errorf("combined filter = %d", len(rs))
+	}
+	if rs := s.Reports(&model.ReportFilter{From: to}); len(rs) != 0 {
+		t.Errorf("From filter = %d", len(rs))
+	}
+	if rs := s.Reports(&model.ReportFilter{To: from}); len(rs) != 0 {
+		t.Errorf("To filter = %d", len(rs))
+	}
+	if n := s.NewCount("leader"); n != 3 {
+		t.Errorf("NewCount = %d", n)
+	}
+}
+
+func TestReadFailurePanics(t *testing.T) {
+	s := open(t, t.TempDir())
+	seed(t, s)
+	s.Close()
+	reads := map[string]func(){
+		"User": func() { s.User("u1") }, "UserByUsername": func() { s.UserByUsername("a") }, "Users": func() { s.Users() },
+		"Template": func() { s.Template("t1") }, "Templates": func() { s.Templates(true) },
+		"Request": func() { s.Request("q1") }, "Requests": func() { s.Requests() },
+		"Report": func() { s.Report("r1") }, "Reports": func() { s.Reports(nil) },
+		"Stats": func() { s.Stats("leader") }, "NewCount": func() { s.NewCount("leader") },
+		"ChatMessages": func() { s.ChatMessages("all", 0, 0, 1, false) }, "ChatUnread": func() { s.ChatUnread("g1") },
+		"ChatOverseen": func() { s.ChatOverseen() },
+	}
+	for name, fn := range reads {
+		func() {
+			defer func() {
+				f, ok := recover().(*Failure)
+				if !ok || !errors.Is(f, ErrClosed) || !strings.Contains(f.Error(), "closed") {
+					t.Errorf("%s on a closed store: recovered %v", name, f)
+				}
+			}()
+			fn()
+		}()
+	}
+	for _, err := range []error{s.PutUser(model.User{ID: "u7", Username: "new"}), s.PutTemplate(model.Template{ID: "t7"}),
+		s.PutRequest(model.Request{ID: "q7"}), s.PutReport(model.Report{ID: "r7"})} {
+		if !errors.Is(err, ErrClosed) {
+			t.Errorf("write on a closed store: %v", err)
+		}
+	}
+}
+
+func TestCorruptRowsFailLoudly(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	seed(t, s)
+	for _, q := range []string{
+		"UPDATE reports SET fields = 'not json' WHERE id = 'r1'",
+		"UPDATE templates SET fields = '{' WHERE id = 't1'",
+		"UPDATE requests SET recipients = '7' WHERE id = 'q1'",
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, fn := range map[string]func(){
+		"Report": func() { s.Report("r1") }, "Reports": func() { s.Reports(nil) },
+		"Template": func() { s.Template("t1") }, "Templates": func() { s.Templates(true) },
+		"Request": func() { s.Request("q1") }, "Requests": func() { s.Requests() },
+	} {
+		func() {
+			defer func() {
+				if _, ok := recover().(*Failure); !ok {
+					t.Errorf("%s returned damaged data without failing", name)
+				}
+			}()
+			fn()
+		}()
+	}
+	if _, err := s.UpdateReport("r1", func(*model.Report) bool { return true }); err == nil {
+		t.Error("UpdateReport on a damaged row succeeded")
+	}
+}
+
+func TestChat(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	send := func(party, name, peer, body string) model.ChatMessage {
+		t.Helper()
+		conv, a, b := model.ChatConv(party, peer)
+		m, err := s.AddChatMessage(model.ChatMessage{Conv: conv, Timestamp: t0, SenderParty: party, SenderName: name, Body: body}, a, b)
+		if err != nil || m.Seq == 0 {
+			t.Fatalf("AddChatMessage: %+v, %v", m, err)
+		}
+		return m
+	}
+	m1 := send("g1", "Alpha", model.ChatAll, "hello all")
+	m2 := send("leader", "Leader", model.ChatAll, "welcome")
+	send("g1", "Alpha", "g2", "psst bravo")
+	m4 := send("g2", "Bravo", "g1", "yes?")
+	send("g2", "Bravo", "leader", "question")
+	if m2.Seq <= m1.Seq {
+		t.Error("sequence numbers do not increase")
+	}
+	// Both sides of a direct conversation use the same key.
+	c12, _, _ := model.ChatConv("g1", "g2")
+	c21, _, _ := model.ChatConv("g2", "g1")
+	cl2, _, _ := model.ChatConv("leader", "g2")
+	if c12 != c21 || c12 == cl2 {
+		t.Fatalf("conversation keys: %q %q %q", c12, c21, cl2)
+	}
+
+	all := s.ChatMessages(model.ChatAll, 0, 0, 10, false)
+	if len(all) != 2 || all[0].Body != "hello all" || all[1].Body != "welcome" || !all[0].Timestamp.Equal(t0) || all[1].SenderName != "Leader" {
+		t.Errorf("all = %+v", all)
+	}
+	if got := s.ChatMessages(c12, 0, 0, 10, false); len(got) != 2 || got[0].Body != "psst bravo" || got[1].SenderParty != "g2" {
+		t.Errorf("direct = %+v", got)
+	}
+	if got := s.ChatMessages(model.ChatAll, 0, 0, 1, false); len(got) != 1 || got[0].Seq != m2.Seq {
+		t.Errorf("limit keeps the newest: %+v", got)
+	}
+	if got := s.ChatMessages(model.ChatAll, m1.Seq, 0, 10, false); len(got) != 1 || got[0].Seq != m2.Seq {
+		t.Errorf("after = %+v", got)
+	}
+	if got := s.ChatMessages(model.ChatAll, 0, m2.Seq, 10, false); len(got) != 1 || got[0].Seq != m1.Seq {
+		t.Errorf("before = %+v", got)
+	}
+	if got := s.ChatMessages("nobody|here", 0, 0, 10, false); len(got) != 0 {
+		t.Errorf("unknown conversation = %+v", got)
+	}
+
+	// Unread: only messages from others, only in the party's conversations.
+	want := func(party string, exp map[string]int) {
+		t.Helper()
+		got := s.ChatUnread(party)
+		if len(got) != len(exp) {
+			t.Errorf("unread %s = %v, want %v", party, got, exp)
+		}
+		for k, v := range exp {
+			if got[k] != v {
+				t.Errorf("unread %s[%s] = %d, want %d", party, k, got[k], v)
+			}
+		}
+	}
+	want("g1", map[string]int{model.ChatAll: 1, c12: 1})
+	want("g2", map[string]int{model.ChatAll: 2, c12: 1})
+	want("leader", map[string]int{model.ChatAll: 1, cl2: 1})
+	want("g3", map[string]int{model.ChatAll: 2})
+
+	if err := s.MarkChatRead("g1", c12, m4.Seq); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkChatRead("g1", model.ChatAll, m2.Seq); err != nil {
+		t.Fatal(err)
+	}
+	want("g1", map[string]int{})
+	want("g2", map[string]int{model.ChatAll: 2, c12: 1}) // the other side is unaffected
+	// The marker never moves backwards.
+	if err := s.MarkChatRead("g1", model.ChatAll, 1); err != nil {
+		t.Fatal(err)
+	}
+	want("g1", map[string]int{})
+	send("leader", "Leader", model.ChatAll, "new one")
+	want("g1", map[string]int{model.ChatAll: 1})
+
+	// Oversight: the flag is stored per message and selects what a leader
+	// may see; messages sent before it was switched on stay private.
+	if got := s.ChatOverseen(); len(got) != 0 {
+		t.Errorf("overseen conversations before any: %+v", got)
+	}
+	if _, err := s.AddChatMessage(model.ChatMessage{Conv: c12, Timestamp: t0, SenderParty: "g1", SenderName: "Alpha", Body: "watched", Overseen: true}, "g1", "g2"); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.ChatMessages(c12, 0, 0, 10, true); len(got) != 1 || got[0].Body != "watched" || !got[0].Overseen {
+		t.Errorf("overseen only = %+v", got)
+	}
+	if got := s.ChatMessages(c12, 0, 0, 10, false); len(got) != 3 || got[0].Overseen || !got[2].Overseen {
+		t.Errorf("all with flags = %+v", got)
+	}
+	if got := s.ChatOverseen(); len(got) != 1 || got[0].A != "g1" || got[0].B != "g2" || got[0].Count != 1 {
+		t.Errorf("ChatOverseen = %+v", got)
+	}
+
+	for _, bad := range []model.ChatMessage{{}, {Conv: "all", Body: "x"}, {Conv: "all", SenderParty: "g1"}} {
+		if _, err := s.AddChatMessage(bad, "", ""); err == nil {
+			t.Errorf("invalid message %+v accepted", bad)
+		}
+	}
+	// Messages and read markers survive a restart.
+	s.Close()
+	s2 := open(t, dir)
+	if got := s2.ChatMessages(model.ChatAll, 0, 0, 10, false); len(got) != 3 || got[2].Body != "new one" {
+		t.Errorf("after reopen: %+v", got)
+	}
+	if got := s2.ChatUnread("g1"); got[model.ChatAll] != 1 || len(got) != 1 {
+		t.Errorf("unread after reopen: %v", got)
+	}
+	s2.Close()
+	if _, err := s2.AddChatMessage(model.ChatMessage{Conv: "all", SenderParty: "g1", Body: "x"}, "", ""); !errors.Is(err, ErrClosed) {
+		t.Errorf("write on closed store: %v", err)
+	}
+	if err := s2.MarkChatRead("g1", "all", 1); !errors.Is(err, ErrClosed) {
+		t.Errorf("mark on closed store: %v", err)
+	}
+}
+
+// A database created by an earlier version is upgraded in place, and chat
+// messages from before oversight existed are not exposed by the upgrade.
+func TestMigrationFromEarlierVersion(t *testing.T) {
+	dir := t.TempDir()
+	saved := migrations
+	migrations = saved[:2]
+	s, err := Open(dir)
+	migrations = saved
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(t, s)
+	// A chat message written before the oversight column existed.
+	if _, err := s.db.Exec(`INSERT INTO chat_messages (conv, party_a, party_b, ts, sender_party, sender_name, body) VALUES ('g1|g2','g1','g2',1,'g1','A','old and private')`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s2 := open(t, dir)
+	if len(s2.Reports(nil)) != 4 || len(s2.Users()) != 4 {
+		t.Error("data lost in the upgrade")
+	}
+	conv, a, b := model.ChatConv("g1", "g2")
+	if _, err := s2.AddChatMessage(model.ChatMessage{Conv: conv, Timestamp: t0, SenderParty: "g1", SenderName: "A", Body: "hi"}, a, b); err != nil {
+		t.Errorf("chat unusable after upgrade: %v", err)
+	}
+	if got := s2.ChatMessages(conv, 0, 0, 10, true); len(got) != 0 {
+		t.Errorf("messages from before the upgrade became overseen: %+v", got)
+	}
+	if got := s2.ChatMessages(conv, 0, 0, 10, false); len(got) != 2 || got[0].Body != "old and private" {
+		t.Errorf("history after upgrade: %+v", got)
+	}
+	// Opening with only the first migration applied also works.
+	dir1 := t.TempDir()
+	migrations = saved[:1]
+	s3, err := Open(dir1)
+	migrations = saved
+	if err != nil {
+		t.Fatal(err)
+	}
+	s3.Close()
+	open(t, dir1)
+}
+
+// FuzzReportRoundTrip stores arbitrary text and searches with arbitrary
+// queries. Whatever goes in must come out byte for byte, a report must be
+// found by its own words, and no input may be interpreted as SQL.
+func FuzzReportRoundTrip(f *testing.F) {
+	f.Add("subject", "content", "folder", "value", "subject")
+	f.Add("Bron är AVSTÄNGD", "100% _ \\ '", "x'); DROP TABLE reports;--", "\"", "%")
+	f.Add("a\x00b", "\xff", "", "", "_")
+	dir := f.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Cleanup(func() { s.Close() })
+	f.Fuzz(func(t *testing.T, subject, content, folder, value, query string) {
+		in := model.Report{ID: "fuzz", Timestamp: t0, SenderID: "g1", SenderName: "Alpha", ReceiverID: "leader", Status: model.StatusNew,
+			Subject: model.CleanLine(subject), Content: model.CleanText(content), Folder: model.CleanLine(folder),
+			Fields: []model.FieldValue{{Key: "k", Label: "L", Value: model.CleanText(value)}}}
+		if err := s.PutReport(in); err != nil {
+			t.Fatal(err)
+		}
+		out, ok := s.Report("fuzz")
+		if !ok || out.Subject != in.Subject || out.Content != in.Content || out.Folder != in.Folder ||
+			out.Fields[0].Value != in.Fields[0].Value || !out.Timestamp.Equal(in.Timestamp) {
+			t.Fatalf("round trip changed the report:\n in  %+v\n out %+v", in, out)
+		}
+		flt := model.ReportFilter{Query: query}
+		got := s.Reports(&flt)
+		// The SQL search must agree with the reference implementation.
+		ref := model.ReportFilter{Query: query}
+		ref.Prepare()
+		if want := ref.Match(&in); want != (len(got) == 1) {
+			t.Fatalf("query %q: SQL found %d, reference says match=%v (report %+v)", query, len(got), want, in)
+		}
+		var n int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM reports").Scan(&n); err != nil || n != 1 {
+			t.Fatalf("table damaged: %d rows, %v", n, err)
 		}
 	})
 }

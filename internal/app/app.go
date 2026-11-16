@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/rom/gr_report/internal/auth"
+	"github.com/rom/gr_report/internal/i18n"
 	"github.com/rom/gr_report/internal/model"
 	"github.com/rom/gr_report/internal/sandbox"
 	"github.com/rom/gr_report/internal/store"
@@ -63,7 +64,7 @@ func (c *certStore) get(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 func (a *App) Bootstrap(st *store.Store) error {
 	now := time.Now().UTC()
 	if len(st.Templates(true)) == 0 {
-		for _, t := range starterTemplates() {
+		for _, t := range starterTemplates(a.Cfg.Lang) {
 			t.ID, t.Created = model.NewID(), now
 			if err := t.Validate(); err != nil {
 				return err
@@ -115,7 +116,27 @@ func (a *App) Bootstrap(st *store.Store) error {
 	return nil
 }
 
-func starterTemplates() []model.Template {
+// starterTemplates returns the templates created in an empty database, in
+// the configured default language. They are ordinary templates afterwards.
+func starterTemplates(lang i18n.Lang) []model.Template {
+	if lang == i18n.SV {
+		return []model.Template{
+			{Name: "Minimal rapport", Description: "Fritextrapport med enbart de obligatoriska delarna: tid, avsändare, mottagare, ämne och innehåll."},
+			{
+				Name: "Lägesrapport", DefaultSubject: "Lägesrapport",
+				Description: "Återkommande lägesrapport. Beskriv vad som har hänt, vad ni gör och vad ni behöver.",
+				ContentHelp: "Sammanfattning av läget och planerade åtgärder",
+				Fields: []model.Field{
+					{Label: "Plats", Type: model.FieldText, Required: true},
+					{Label: "Läget avser", Type: model.FieldDatetime, Help: "lokal tid för observationen"},
+					{Label: "Status", Type: model.FieldSelect, Required: true, Options: []string{"Grön", "Gul", "Röd"}},
+					{Label: "Personal", Type: model.FieldNumber, Help: "antal personer"},
+					{Label: "Behöver stöd", Type: model.FieldCheckbox},
+					{Label: "Behov och önskemål", Type: model.FieldTextarea},
+				},
+			},
+		}
+	}
 	return []model.Template{
 		{Name: "Minimal report", Description: "Free-text report with only the mandatory parts: time, sender, receiver, subject and content."},
 		{
@@ -176,6 +197,13 @@ func (a *App) Run(ctx context.Context) error {
 
 	srv := web.New(st, a.Log, !cfg.InsecureHTTP)
 	srv.Hasher = a.Hasher
+	if a.Cfg.Lang != "" {
+		srv.DefaultLang = a.Cfg.Lang
+	}
+	srv.Chat, srv.ChatOversight = a.Cfg.Chat, a.Cfg.Chat && a.Cfg.ChatOversight
+	if srv.ChatOversight {
+		a.Log.Info("chat oversight is on: the exercise leader can read chat between groups sent from now on")
+	}
 
 	ln, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {

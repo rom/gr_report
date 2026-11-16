@@ -1,47 +1,47 @@
 {{define "content"}}
 <h1>{{.User.DisplayName}}</h1>
 <div class="cols">
-<section class="panel">
-  <h2>Write a report</h2>
+<section class="panel" aria-labelledby="h-write">
+  <h2 id="h-write">{{$.T "Write a report"}}</h2>
   {{if .Data.Templates}}
   <form method="get" action="/reports/new">
-    <label for="template">Report template</label>
+    <label for="template">{{$.T "Report template"}}</label>
     <select id="template" name="template">
       {{range .Data.Templates}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
     </select>
-    <div class="actions"><button>Start report</button></div>
+    <div class="actions"><button>{{$.T "Start report"}}</button></div>
   </form>
-  {{else}}<p class="muted">No report templates are available yet.</p>{{end}}
+  {{else}}<p class="muted">{{$.T "No report templates are available yet."}}</p>{{end}}
 </section>
-<section class="panel">
-  <h2>Open requests from the exercise leader</h2>
+<section class="panel" aria-labelledby="h-requests">
+  <h2 id="h-requests">{{$.T "Open requests from the exercise leader"}}</h2>
   {{if .Data.Requests}}
-  <table>
-    <thead><tr><th>Received</th><th>Subject</th><th>Answered</th><th></th></tr></thead>
+  <table aria-labelledby="h-requests">
+    <thead><tr><th scope="col">{{$.T "Received"}}</th><th scope="col">{{$.T "Subject"}}</th><th scope="col">{{$.T "Answered"}}</th><th scope="col"><span class="sr-only">{{$.T "Actions"}}</span></th></tr></thead>
     <tbody>
     {{range .Data.Requests}}
     <tr{{if not .Responses}} class="new"{{end}}>
       <td>{{ts .Req.Created}}</td>
       <td><a href="/requests/{{.Req.ID}}">{{.Req.Subject}}</a></td>
-      <td>{{if .Responses}}yes ({{.Responses}}){{else}}<span class="tag new">no</span>{{end}}</td>
-      <td><a href="/reports/new?request={{.Req.ID}}">Answer</a></td>
+      <td>{{if .Responses}}{{$.T "yes"}} ({{.Responses}}){{else}}<span class="tag new">{{$.T "no"}}</span>{{end}}</td>
+      <td><a href="/reports/new?request={{.Req.ID}}" aria-label="{{$.T "Answer: %s" .Req.Subject}}">{{$.T "Answer"}}</a></td>
     </tr>
     {{end}}
     </tbody>
   </table>
-  {{else}}<p class="muted">No open requests.</p>{{end}}
+  {{else}}<p class="muted">{{$.T "No open requests."}}</p>{{end}}
 </section>
 </div>
-<h2>Recently sent</h2>
+<h2 id="h-recent">{{$.T "Recently sent"}}</h2>
 {{if .Data.Recent}}
-<div class="scroll"><table>
-  <thead><tr><th>Time</th><th>Subject</th><th>To</th><th>Template</th></tr></thead>
+<div class="scroll"><table aria-labelledby="h-recent">
+  <thead><tr><th scope="col">{{$.T "Time"}}</th><th scope="col">{{$.T "Subject"}}</th><th scope="col">{{$.T "To"}}</th><th scope="col">{{$.T "Template"}}</th></tr></thead>
   <tbody>
   {{range .Data.Recent}}
-  <tr><td>{{ts .Timestamp}}</td><td><a href="/reports/{{.ID}}">{{.Subject}}</a></td><td>{{.ReceiverName}}</td><td>{{.TemplateName}}</td></tr>
+  <tr><td>{{ts .Timestamp}}</td><td><a href="/reports/{{.ID}}">{{.Subject}}</a></td><td>{{if eq .ReceiverID "leader"}}{{$.T "Exercise leader"}}{{else}}{{.ReceiverName}}{{end}}</td><td>{{.TemplateName}}</td></tr>
   {{end}}
   </tbody>
 </table></div>
-<p><a href="/sent">All sent reports</a></p>
-{{else}}<p class="muted">Nothing sent yet.</p>{{end}}
+<p><a href="/sent">{{$.T "All sent reports"}}</a></p>
+{{else}}<p class="muted">{{$.T "Nothing sent yet."}}</p>{{end}}
 {{end}}

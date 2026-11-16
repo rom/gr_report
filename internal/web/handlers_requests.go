@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 
+	"github.com/rom/gr_report/internal/i18n"
 	"github.com/rom/gr_report/internal/model"
 )
 
@@ -27,7 +28,7 @@ func (s *Server) requestRows(c *reqCtx) []requestRow {
 }
 
 func (s *Server) requests(c *reqCtx) {
-	s.render(c, http.StatusOK, "requests", "Requests", s.requestRows(c), "")
+	s.render(c, http.StatusOK, "requests", c.t("Requests"), s.requestRows(c), "")
 }
 
 type requestFormView struct {
@@ -42,7 +43,7 @@ func (s *Server) requestFormPage(c *reqCtx, status int, q model.Request, errMsg 
 	for _, id := range q.Recipients {
 		v.Selected[id] = true
 	}
-	s.render(c, status, "request_new", "New request", v, errMsg)
+	s.render(c, status, "request_new", c.t("New request"), v, errMsg)
 }
 
 func (s *Server) requestForm(c *reqCtx) {
@@ -58,20 +59,20 @@ func (s *Server) requestCreate(c *reqCtx) {
 	}
 	bad := func(msg string) { s.requestFormPage(c, http.StatusUnprocessableEntity, q, msg) }
 	if err := q.Validate(); err != nil {
-		bad(err.Error())
+		bad(i18n.TErr(c.lang, err))
 		return
 	}
 	if f.Get("to") != "all" && len(q.Recipients) == 0 {
-		bad("Select at least one group, or send to all groups.")
+		bad(c.t("Select at least one group, or send to all groups."))
 		return
 	}
 	if t, ok := s.Store.Template(q.TemplateID); !ok || t.Archived {
-		bad("Select a report template.")
+		bad(c.t("Select a report template."))
 		return
 	}
 	for _, id := range q.Recipients {
 		if g, ok := s.Store.User(id); !ok || g.Role != model.RoleGroup {
-			bad("Unknown recipient.")
+			bad(c.t("Unknown recipient."))
 			return
 		}
 	}
@@ -79,7 +80,7 @@ func (s *Server) requestCreate(c *reqCtx) {
 		return
 	}
 	s.audit(c, "request_sent", "request", q.ID, "recipients", len(q.Recipients))
-	s.redirect(c, "/requests/"+q.ID, "Request sent.")
+	s.redirect(c, "/requests/"+q.ID, c.t("Request sent."))
 }
 
 type recipientRow struct {
@@ -99,7 +100,7 @@ func (s *Server) requestView(c *reqCtx) {
 	q, ok := s.Store.Request(c.r.PathValue("id"))
 	leader := c.user.Role == model.RoleLeader
 	if !ok || (!leader && !q.Addressed(c.user.ID)) {
-		s.fail(c, http.StatusNotFound, "No such request.")
+		s.fail(c, http.StatusNotFound, c.t("No such request."))
 		return
 	}
 	v := &requestView{Req: q, Leader: leader}
@@ -127,7 +128,7 @@ func (s *Server) requestView(c *reqCtx) {
 func (s *Server) requestClose(c *reqCtx) {
 	q, ok := s.Store.Request(c.r.PathValue("id"))
 	if !ok {
-		s.fail(c, http.StatusNotFound, "No such request.")
+		s.fail(c, http.StatusNotFound, c.t("No such request."))
 		return
 	}
 	q.Closed = c.r.PostForm.Get("closed") == "1"
@@ -135,9 +136,9 @@ func (s *Server) requestClose(c *reqCtx) {
 		return
 	}
 	s.audit(c, "request_closed", "request", q.ID, "closed", q.Closed)
-	msg := "Request reopened."
+	msg := c.t("Request reopened.")
 	if q.Closed {
-		msg = "Request closed."
+		msg = c.t("Request closed.")
 	}
 	s.redirect(c, "/requests/"+q.ID, msg)
 }

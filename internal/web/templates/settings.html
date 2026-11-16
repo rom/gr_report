@@ -1,0 +1,24 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>{{$.T "Settings"}}</h1>
+<form class="panel" method="post" action="/settings">
+  {{if .User}}<input type="hidden" name="csrf" value="{{.CSRF}}">{{end}}
+  <label for="lang">{{$.T "Language"}}</label>
+  <select id="lang" name="lang">
+    {{range $d.Languages}}<option value="{{.}}" lang="{{.}}"{{if eq . $.Lang}} selected{{end}}>{{.Name}}</option>{{end}}
+  </select>
+  <label for="theme">{{$.T "Colour theme"}}</label>
+  <select id="theme" name="theme" aria-describedby="theme-help">
+    {{range $d.Themes}}<option value="{{.Name}}"{{if eq .Name $.Theme}} selected{{end}}>{{$.Tr .Label}}</option>{{end}}
+  </select>
+  <p class="help" id="theme-help">{{$.T "System default follows the light, dark or increased contrast setting of your device. All themes meet the WCAG AA contrast requirement; High contrast meets AAA."}}</p>
+  <div class="actions"><button>{{$.T "Save settings"}}</button>{{if not .User}} <a href="/login">{{$.T "Back to log in"}}</a>{{end}}</div>
+  <p class="help">{{$.T "The settings are stored in this browser only, so everyone sharing a group account can choose their own."}}</p>
+</form>
+<h2 id="themes-heading">{{$.T "Themes"}}</h2>
+<ul class="swatches" aria-labelledby="themes-heading">
+  {{range $d.Themes}}{{if ne .Name "auto"}}
+  <li class="swatch" data-theme="{{.Name}}">{{$.Tr .Label}}<br><span class="chip">Aa</span> <span class="tag new">{{$.Tr "new"}}</span></li>
+  {{end}}{{end}}
+</ul>
+{{end}}

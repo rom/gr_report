@@ -7,7 +7,7 @@ flowchart LR
   G[Groups<br/>browser] -- HTTPS --> S
   L[Exercise leader<br/>browser] -- HTTPS --> S
   A[Administrator<br/>browser] -- HTTPS --> S
-  S[gr_report<br/>single process] -- append + fsync --> J[(journal.jsonl)]
+  S[gr_report<br/>single process] -- SQL, synchronous=FULL --> J[(gr_report.db<br/>SQLite)]
   S -- read at start / reload --> T[TLS certificate and key]
   C[certbot or openssl<br/>scripts/] -. writes .-> T
   S -- stderr --> O[systemd journal]
@@ -15,7 +15,7 @@ flowchart LR
 
 gr_report is one process serving HTML over HTTPS. It makes no outbound
 connections and talks to no other service. Its only persistent state is one
-file.
+SQLite database, accessed in-process.
 
 ## Building blocks
 
@@ -26,24 +26,28 @@ flowchart TB
   app --> sandbox[internal/sandbox<br/>Landlock, seccomp, capabilities]
   app --> store
   web[internal/web<br/>routes, middleware, handlers, HTML] --> auth[internal/auth<br/>passwords, sessions, throttling]
-  web --> store[internal/store<br/>in-memory state + journal]
+  web --> store[internal/store<br/>SQLite]
   web --> model
+  web --> i18n
   store --> model[internal/model<br/>entities, validation, filter, sort]
+  model --> i18n[internal/i18n<br/>message catalogue en/sv]
+  auth --> i18n
 ```
 
 | Package | Responsibility | Depends on |
 | --- | --- | --- |
 | `cmd/gr_report` | Process entry: parse flags, install signal handlers, exit code | `app` |
 | `internal/app` | Configuration, first-run bootstrap, TLS loading and reload, start-up order, graceful shutdown | all below |
-| `internal/web` | HTTP routing, security headers, authentication and authorisation middleware, handlers, embedded templates and CSS | `auth`, `store`, `model` |
-| `internal/auth` | Password hashing and policy, session table, login throttling | – |
-| `internal/store` | Thread-safe in-memory state, durable append-only journal, replay and compaction | `model` |
-| `internal/model` | Domain types, input normalisation and validation, report filter and sort | – |
+| `internal/web` | HTTP routing, security headers, authentication and authorisation middleware, language and theme preferences, handlers, embedded templates, stylesheet (themes) and script | `auth`, `store`, `model`, `i18n` |
+| `internal/auth` | Password hashing and policy, session table, login throttling | `i18n` |
+| `internal/store` | SQLite database: schema migrations, queries, search | `model` |
+| `internal/model` | Domain types, input normalisation and validation, report filter and sort | `i18n` |
+| `internal/i18n` | Message catalogue (English keys, Swedish translations), translatable errors, language negotiation | – |
 | `internal/sandbox` | Self-confinement on Linux, no-op elsewhere | – |
 
-Dependencies point downwards only. `model`, `auth` and `sandbox` have no
-dependencies inside the module, and the module has no dependencies outside
-the Go standard library.
+Dependencies point downwards only. `i18n` and `sandbox` are leaves. The
+only third-party code in the binary is the pure-Go SQLite driver used by
+`store` ([ADR 0010](adr/0010-vetted-dependencies.md)).
 
 ## Domain model
 
@@ -103,6 +107,17 @@ erDiagram
 * Only `status` and `folder` of a report ever change; they belong to the
   receiver's handling of the report, not to the report itself.
 
+### Chat
+
+Chat is deliberately separate from reports. A **party** is a group account
+or the exercise leaders collectively. A **conversation** is either `all`
+or the unordered pair of two parties; it is a key computed on the fly, not
+a stored object. `chat_messages` holds immutable messages with a sequence
+number; `chat_read` holds, per party and conversation, the last sequence
+number seen. See [ADR 0016](adr/0016-chat.md). Each message between two
+groups also records whether it was sent under leader oversight
+([ADR 0017](adr/0017-chat-oversight.md)).
+
 ## Queues
 
 A queue is not a stored object. It is the set of reports with a given
@@ -125,7 +140,7 @@ sequenceDiagram
   participant S as store
   participant K as kernel
   M->>A: ParseConfig (flags, env)
-  A->>S: Open(data dir): lock, replay journal, compact
+  A->>S: Open(data dir): lock, open database, migrate schema, integrity check
   A->>S: Bootstrap (first run: admin + starter templates)
   A->>A: load TLS certificate
   A->>K: listen on address
@@ -148,12 +163,21 @@ sequenceDiagram
   W->>S: load template (and request)
   W->>W: model.FillReport: normalise + validate
   W->>S: PutReport
-  S->>S: append JSON line, fsync, then update memory
+  S->>S: INSERT in a transaction, commit with fsync
   W-->>B: 303 to /reports/{id}
 ```
 
-A write is acknowledged only after `fsync`. If the append fails, memory is
-not changed and the user gets an error.
+A write is acknowledged only after the commit is on disk. If it fails,
+nothing is stored and the user gets an error.
+
+### Rendering a page
+
+Each request resolves a language (cookie, then `Accept-Language`, then the
+server default) and a theme (cookie, default `auto`). Handlers produce
+messages as keys; the page template translates them with the request's
+language and sets `<html lang="…" data-theme="…">`. The stylesheet maps the
+theme name to a set of colours. The optional script polls
+`/api/new-count` and reveals a notice when reports arrive.
 
 ### Certificate renewal
 
@@ -174,7 +198,7 @@ flowchart TB
       end
     end
     etc[/etc/gr_report: env, tls/]
-    var[/var/lib/gr_report: journal.jsonl/]
+    var[/var/lib/gr_report: gr_report.db/]
   end
   bin -- read --> etc
   bin -- read/write --> var
@@ -191,6 +215,11 @@ sandbox layers are absent.
   `model` (`CleanLine`, `CleanText`, `Validate`, `FillReport`) before it is
   stored. The store only checks structural validity.
 * **Output escaping.** All HTML is produced by `html/template`.
+* **Language.** Messages are English keys translated at the edge
+  ([ADR 0013](adr/0013-internationalisation.md)); user-written content is
+  shown as written.
+* **Accessibility and themes.** Semantic markup and contrast-checked colour
+  sets, enforced by tests ([ADR 0014](adr/0014-accessibility-and-themes.md)).
 * **Authorisation.** Route-level role lists in `web.Handler`, plus
   object-level checks in the handlers that load a report or request.
 * **Time.** The clock is injected (`Server.Now`, `Sessions.Now`,
@@ -205,8 +234,11 @@ sandbox layers are absent.
 
 | Item | Consequence | Possible remedy |
 | --- | --- | --- |
-| All state in memory | RAM grows with the number of reports | Move reports to an embedded database ([ADR 0003](adr/0003-journal-storage.md)) |
-| Sessions in memory | Restart logs users out | Persist sessions in the journal |
-| No live updates | The leader sees new reports on reload or the 60 s auto-refresh | Server-sent events with a small, CSP-compatible script |
+| Queue views sort in memory | A view loads all matching rows before paging | Move sorting and `LIMIT` into SQL ([ADR 0012](adr/0012-sqlite-storage.md)) |
+| Sessions in memory | Restart logs users out | Persist sessions in the database |
+| New-report notice and chat by polling | Up to 30 s (notice) or 4 s (chat) delay; a request per open chat page every 4 s | Server-sent events |
+| No moderation of chat | Misuse can only be met by disabling an account or the chat; oversight (optional) only reads | Message removal by the leader |
+| Page script untested by automation | A regression shows up only in manual use | Browser test job in CI |
+| No screen-reader review | Markup checks cannot prove the experience | Manual audit with assistive technology |
 | Shared group accounts | No per-person audit trail | Personal accounts with group membership |
 | SELinux/AppArmor not exercised in CI | Policy errors show up at deployment | Add a VM-based test job |

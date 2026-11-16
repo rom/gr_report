@@ -33,7 +33,16 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 		fmt.Fprintln(stdout, "gr_report", app.Version)
 		return 0
 	}
+	if cfg.PrintConfig {
+		fmt.Fprint(stdout, cfg.YAML())
+		return 0
+	}
 	log := slog.New(slog.NewTextHandler(stderr, nil))
+	if cfg.File != "" {
+		log.Info("configuration", "file", cfg.File)
+	} else {
+		log.Info("configuration", "file", "none; using flags, environment and defaults")
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

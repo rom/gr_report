@@ -3,41 +3,41 @@
 <h1>{{$d.Req.Subject}}</h1>
 <div class="panel">
   <dl class="meta">
-    <dt>Sent</dt><dd>{{ts $d.Req.Created}}</dd>
-    <dt>Report template</dt><dd>{{$d.Template.Name}}</dd>
-    <dt>State</dt><dd>{{if $d.Req.Closed}}closed{{else}}open{{end}}</dd>
+    <dt>{{$.T "Sent"}}</dt><dd>{{ts $d.Req.Created}}</dd>
+    <dt>{{$.T "Report template"}}</dt><dd>{{$d.Template.Name}}</dd>
+    <dt>{{$.T "State"}}</dt><dd>{{if $d.Req.Closed}}{{$.T "closed"}}{{else}}{{$.T "open"}}{{end}}</dd>
   </dl>
-  {{if $d.Req.Body}}<h2>Question / information requested</h2><div class="body">{{$d.Req.Body}}</div>{{end}}
+  {{if $d.Req.Body}}<h2>{{$.T "Question / information requested"}}</h2><div class="body">{{$d.Req.Body}}</div>{{end}}
   <div class="actions">
   {{if $d.Leader}}
     <form class="inlineform" method="post" action="/requests/{{$d.Req.ID}}/close">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      {{if $d.Req.Closed}}<button class="plain" name="closed" value="0">Reopen request</button>
-      {{else}}<button class="plain" name="closed" value="1">Close request</button>{{end}}
+      {{if $d.Req.Closed}}<button class="plain" name="closed" value="0">{{$.T "Reopen request"}}</button>
+      {{else}}<button class="plain" name="closed" value="1">{{$.T "Close request"}}</button>{{end}}
     </form>
-    <a href="/queue?request={{$d.Req.ID}}">Show responses in queue</a>
+    <a href="/queue?request={{$d.Req.ID}}">{{$.T "Show responses in queue"}}</a>
   {{else if not $d.Req.Closed}}
-    <a class="button" href="/reports/new?request={{$d.Req.ID}}">Answer with a report</a>
+    <a class="button" href="/reports/new?request={{$d.Req.ID}}">{{$.T "Answer with a report"}}</a>
   {{end}}
   </div>
 </div>
 {{if $d.Leader}}
-<h2>Recipients</h2>
-<div class="scroll"><table>
-  <thead><tr><th>Group</th><th>Responses</th></tr></thead>
+<h2 id="h-recipients">{{$.T "Recipients"}}</h2>
+<div class="scroll"><table aria-labelledby="h-recipients">
+  <thead><tr><th scope="col">{{$.T "Group"}}</th><th scope="col">{{$.T "Responses"}}</th></tr></thead>
   <tbody>
-  {{range $d.Recipients}}<tr><td>{{.Name}}</td><td>{{if .Count}}{{.Count}}{{else}}<span class="tag new">none</span>{{end}}</td></tr>
-  {{else}}<tr><td colspan="2" class="muted">No groups.</td></tr>{{end}}
+  {{range $d.Recipients}}<tr><td>{{.Name}}</td><td>{{if .Count}}{{.Count}}{{else}}<span class="tag new">{{$.T "none"}}</span>{{end}}</td></tr>
+  {{else}}<tr><td colspan="2" class="muted">{{$.T "No groups."}}</td></tr>{{end}}
   </tbody>
 </table></div>
 {{end}}
-<h2>{{if $d.Leader}}Responses{{else}}Your responses{{end}}</h2>
-<div class="scroll"><table>
-  <thead><tr><th>Time</th><th>From</th><th>Subject</th><th>Status</th></tr></thead>
+<h2 id="h-responses">{{if $d.Leader}}{{$.T "Responses"}}{{else}}{{$.T "Your responses"}}{{end}}</h2>
+<div class="scroll"><table aria-labelledby="h-responses">
+  <thead><tr><th scope="col">{{$.T "Time"}}</th><th scope="col">{{$.T "From"}}</th><th scope="col">{{$.T "Subject"}}</th><th scope="col">{{$.T "Status"}}</th></tr></thead>
   <tbody>
   {{range $d.Responses}}
-  <tr><td>{{ts .Timestamp}}</td><td>{{.SenderName}}</td><td><a href="/reports/{{.ID}}">{{.Subject}}</a></td><td><span class="tag {{.Status}}">{{.Status}}</span></td></tr>
-  {{else}}<tr><td colspan="4" class="muted">No responses yet.</td></tr>{{end}}
+  <tr><td>{{ts .Timestamp}}</td><td>{{.SenderName}}</td><td><a href="/reports/{{.ID}}">{{.Subject}}</a></td><td><span class="tag {{.Status}}">{{$.Tr .Status}}</span></td></tr>
+  {{else}}<tr><td colspan="4" class="muted">{{$.T "No responses yet."}}</td></tr>{{end}}
   </tbody>
 </table></div>
 {{end}}

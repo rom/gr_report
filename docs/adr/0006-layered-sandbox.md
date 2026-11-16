@@ -15,7 +15,7 @@ given host (SELinux *or* AppArmor, old kernels), and none exist on macOS.
 
 Use independent layers so that losing one does not remove the protection.
 
-1. **In the process** (`internal/sandbox`), applied after the journal, the
+1. **In the process** (`internal/sandbox`), applied after the database, the
    certificate and the listening socket are open:
    no_new_privs, all capabilities dropped, Landlock (file system: data
    directory read/write, TLS directories read-only; network: no TCP bind or

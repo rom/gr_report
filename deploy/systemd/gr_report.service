@@ -1,5 +1,5 @@
 # systemd unit for gr_report. Install with `make install`.
-# Configuration lives in /etc/gr_report/gr_report.env.
+# All settings are in /etc/gr_report/gr_report.yaml.
 #
 # The directives below are the outer sandbox; the process additionally
 # confines itself with Landlock and seccomp after start-up (docs/security.md).
@@ -13,8 +13,7 @@ Wants=network-online.target
 Type=exec
 User=gr_report
 Group=gr_report
-EnvironmentFile=/etc/gr_report/gr_report.env
-ExecStart=/usr/local/bin/gr_report
+ExecStart=/usr/local/bin/gr_report -config /etc/gr_report/gr_report.yaml
 # SIGHUP re-reads the TLS certificate without dropping connections.
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure

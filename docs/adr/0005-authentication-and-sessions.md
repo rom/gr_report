@@ -1,6 +1,6 @@
 # 0005 – Passwords with PBKDF2, server-side in-memory sessions
 
-* Status: Accepted
+* Status: Accepted; the choice of hash function is superseded by [0015](0015-argon2id.md)
 * Date: 2026-11-16
 * ASRs: Q-2, Q-3
 
@@ -32,11 +32,14 @@ credentials are handed out on paper.
 * **OIDC / SSO.** Not available offline; too much set-up.
 * **Signed stateless cookies (JWT).** Cannot be revoked on password reset
   or disable without server state anyway.
-* **Persisting sessions in the journal.** Survives restarts but writes
+* **Persisting sessions in the database.** Survives restarts but writes
   secrets-equivalents to disk and adds churn. Not worth it for an
   exercise-length service.
-* **Argon2id / bcrypt.** Not in the standard library
-  ([ADR 0001](0001-go-standard-library-only.md)).
+* **Argon2id / bcrypt.** Not in the standard library. Third-party modules
+  are allowed since [ADR 0010](0010-vetted-dependencies.md), so moving to
+  Argon2id (`golang.org/x/crypto`) is a reasonable follow-up; the hash
+  format already carries its algorithm name to allow a gradual change.
+  Done in [ADR 0015](0015-argon2id.md).
 * **TOTP second factor.** Out of proportion for shared group accounts.
 
 ## Consequences

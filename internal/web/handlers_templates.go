@@ -5,13 +5,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rom/gr_report/internal/i18n"
 	"github.com/rom/gr_report/internal/model"
 )
 
 const blankFieldRows = 3
 
 func (s *Server) templates(c *reqCtx) {
-	s.render(c, http.StatusOK, "templates", "Report templates", s.Store.Templates(true), "")
+	s.render(c, http.StatusOK, "templates", c.t("Report templates"), s.Store.Templates(true), "")
 }
 
 type fieldRow struct {
@@ -21,23 +22,24 @@ type fieldRow struct {
 }
 
 type templateFormView struct {
-	T     model.Template
-	New   bool
-	Rows  []fieldRow
-	Types []model.FieldType
+	T       model.Template
+	New     bool
+	Rows    []fieldRow
+	Types   []model.FieldType
+	MaxRows int
 }
 
 func (s *Server) templateFormPage(c *reqCtx, status int, t model.Template, errMsg string) {
-	v := &templateFormView{T: t, New: t.ID == "", Types: model.FieldTypes}
+	v := &templateFormView{T: t, New: t.ID == "", Types: model.FieldTypes, MaxRows: model.MaxFields + blankFieldRows}
 	for i, f := range t.Fields {
 		v.Rows = append(v.Rows, fieldRow{I: i, F: f, Options: strings.Join(f.Options, ", ")})
 	}
 	for i := 0; i < blankFieldRows && len(v.Rows) < model.MaxFields; i++ {
 		v.Rows = append(v.Rows, fieldRow{I: len(v.Rows), F: model.Field{Type: model.FieldText}})
 	}
-	title := "Edit template"
+	title := c.t("Edit template")
 	if v.New {
-		title = "New template"
+		title = c.t("New template")
 	}
 	s.render(c, status, "template_edit", title, v, errMsg)
 }
@@ -47,7 +49,7 @@ func (s *Server) templateForm(c *reqCtx) {
 	if id := c.r.PathValue("id"); id != "" {
 		var ok bool
 		if t, ok = s.Store.Template(id); !ok {
-			s.fail(c, http.StatusNotFound, "No such template.")
+			s.fail(c, http.StatusNotFound, c.t("No such template."))
 			return
 		}
 	}
@@ -60,7 +62,7 @@ func (s *Server) templateSave(c *reqCtx) {
 	if id := c.r.PathValue("id"); id != "" {
 		var ok bool
 		if t, ok = s.Store.Template(id); !ok {
-			s.fail(c, http.StatusNotFound, "No such template.")
+			s.fail(c, http.StatusNotFound, c.t("No such template."))
 			return
 		}
 	}
@@ -80,7 +82,7 @@ func (s *Server) templateSave(c *reqCtx) {
 		})
 	}
 	if err := t.Validate(); err != nil {
-		s.templateFormPage(c, http.StatusUnprocessableEntity, t, err.Error())
+		s.templateFormPage(c, http.StatusUnprocessableEntity, t, i18n.TErr(c.lang, err))
 		return
 	}
 	if t.ID == "" {
@@ -91,16 +93,16 @@ func (s *Server) templateSave(c *reqCtx) {
 	}
 	s.audit(c, "template_saved", "template", t.ID, "name", t.Name)
 	if f.Get("more") != "" {
-		s.redirect(c, "/templates/"+t.ID, "Template saved. You can add more fields.")
+		s.redirect(c, "/templates/"+t.ID, c.t("Template saved. You can add more fields."))
 		return
 	}
-	s.redirect(c, "/templates", "Template saved.")
+	s.redirect(c, "/templates", c.t("Template saved."))
 }
 
 func (s *Server) templateArchive(c *reqCtx) {
 	t, ok := s.Store.Template(c.r.PathValue("id"))
 	if !ok {
-		s.fail(c, http.StatusNotFound, "No such template.")
+		s.fail(c, http.StatusNotFound, c.t("No such template."))
 		return
 	}
 	t.Archived = c.r.PostForm.Get("archived") == "1"
@@ -108,9 +110,9 @@ func (s *Server) templateArchive(c *reqCtx) {
 		return
 	}
 	s.audit(c, "template_archived", "template", t.ID, "archived", t.Archived)
-	msg := "Template restored."
+	msg := c.t("Template restored.")
 	if t.Archived {
-		msg = "Template archived. It can no longer be selected for new reports."
+		msg = c.t("Template archived. It can no longer be selected for new reports.")
 	}
 	s.redirect(c, "/templates", msg)
 }

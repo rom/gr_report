@@ -1,27 +1,27 @@
 {{define "content"}}
-<h1>Report templates</h1>
-<p><a class="button" href="/templates/new">New template</a></p>
-<p class="muted">Every report always has a timestamp, sender, receiver, subject and content. A template adds guidance and extra fields.</p>
-<div class="scroll"><table>
-  <thead><tr><th>Name</th><th>Extra fields</th><th>Description</th><th>State</th><th></th></tr></thead>
+<h1 id="h-templates">{{$.T "Report templates"}}</h1>
+<p><a class="button" href="/templates/new">{{$.T "New template"}}</a></p>
+<p class="muted">{{$.T "Every report always has a timestamp, sender, receiver, subject and content. A template adds guidance and extra fields."}}</p>
+<div class="scroll"><table aria-labelledby="h-templates">
+  <thead><tr><th scope="col">{{$.T "Name"}}</th><th scope="col">{{$.T "Extra fields"}}</th><th scope="col">{{$.T "Description"}}</th><th scope="col">{{$.T "State"}}</th><th scope="col">{{$.T "Actions"}}</th></tr></thead>
   <tbody>
   {{range .Data}}
   <tr>
     <td><a href="/templates/{{.ID}}">{{.Name}}</a></td>
     <td>{{len .Fields}}</td>
     <td>{{.Description}}</td>
-    <td>{{if .Archived}}<span class="tag">archived</span>{{else}}<span class="tag filed">active</span>{{end}}</td>
+    <td>{{if .Archived}}<span class="tag">{{$.T "archived"}}</span>{{else}}<span class="tag filed">{{$.T "active"}}</span>{{end}}</td>
     <td>
       <form class="inlineform" method="post" action="/templates/{{.ID}}/archive">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">
-        {{if .Archived}}<button class="link" name="archived" value="0">Restore</button>
-        {{else}}<button class="link" name="archived" value="1">Archive</button>{{end}}
+        {{if .Archived}}<button class="link" name="archived" value="0" aria-label="{{$.T "Restore: %s" .Name}}">{{$.T "Restore"}}</button>
+        {{else}}<button class="link" name="archived" value="1" aria-label="{{$.T "Archive: %s" .Name}}">{{$.T "Archive"}}</button>{{end}}
       </form>
-      {{if and (eq $.User.Role "leader") (not .Archived)}} · <a href="/requests/new?template={{.ID}}">Send request</a>{{end}}
+      {{if and (eq $.User.Role "leader") (not .Archived)}} · <a href="/requests/new?template={{.ID}}" aria-label="{{$.T "Send request: %s" .Name}}">{{$.T "Send request"}}</a>{{end}}
     </td>
   </tr>
   {{else}}
-  <tr><td colspan="5" class="muted">No templates.</td></tr>
+  <tr><td colspan="5" class="muted">{{$.T "No templates."}}</td></tr>
   {{end}}
   </tbody>
 </table></div>

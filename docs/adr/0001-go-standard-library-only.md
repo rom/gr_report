@@ -1,6 +1,6 @@
 # 0001 – Go with the standard library only, one static binary
 
-* Status: Accepted
+* Status: Superseded by [0010](0010-vetted-dependencies.md)
 * Date: 2026-11-16
 * ASRs: C-1, Q-2, Q-3, Q-10
 

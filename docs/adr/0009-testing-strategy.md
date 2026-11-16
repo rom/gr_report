@@ -21,8 +21,9 @@ most costly and least visible.
   inherently unreachable error branches.
 * **Fuzzing** with Go's native fuzzer for everything that parses untrusted
   or stored input: report input, template definitions, search/sort, text
-  cleaning, the journal parser (with a compaction round-trip property),
-  stored password hashes, queue parameters, the whole HTTP router (no 5xx,
+  cleaning, the storage layer (round trip and search, cross-checked against
+  a reference implementation), Accept-Language headers, stored password
+  hashes, queue parameters, the whole HTTP router (no 5xx,
   no unescaped markup), and the BPF generator against a reference policy.
   `make fuzz` runs each target for a fixed time; crashers land in
   `testdata/fuzz` and become regression tests.
@@ -32,6 +33,14 @@ most costly and least visible.
   sandboxed with TLS.
 * **Two build modes.** The coverage run uses `CGO_ENABLED=0` (the release
   configuration, full sandbox); a separate `-race` run uses cgo.
+* **Accessibility and theme checks** ([ADR 0014](0014-accessibility-and-themes.md)):
+  every page is rendered for every role in both languages and its markup is
+  audited; the contrast ratio of every colour pair of every theme is
+  computed from the stylesheet. A negative test proves the audit detects
+  each kind of mistake.
+* **Translation checks** ([ADR 0013](0013-internationalisation.md)): the
+  sources are scanned for message keys; a key without a Swedish translation,
+  an unused translation or mismatching format verbs fails the build.
 * **Static checks.** `gofmt`, `go vet` for Linux amd64/arm64 and macOS,
   `golangci-lint`, `shellcheck`, and validation of the systemd, AppArmor
   and SELinux files where the tools are installed.
@@ -55,3 +64,6 @@ most costly and least visible.
   must remain last (the file is named `zz_linux_test.go` for that reason).
 * SELinux and AppArmor enforcement is outside automated testing and must be
   checked on the target distribution.
+* The page script has no automated test; it is small, optional and was
+  exercised by hand in a browser. Screen-reader behaviour cannot be verified
+  by markup checks alone.

@@ -15,17 +15,23 @@
 | Threat | Counter-measures |
 | --- | --- |
 | Eavesdropping or tampering on the exercise network | TLS mandatory by default, TLS ≥ 1.2, HSTS, `Secure` cookies |
-| Password guessing | PBKDF2-HMAC-SHA256 with 600 000 iterations, login throttling per account+address and per address, generated one-time passwords, uniform timing for unknown users |
+| Password guessing | Argon2id (19 MiB, 2 passes; [ADR 0015](adr/0015-argon2id.md)) with at most 4 concurrent derivations, older PBKDF2 hashes upgraded at login, login throttling per account+address and per address, generated one-time passwords, uniform timing for unknown users |
 | Session theft / fixation | 256-bit random token, only its SHA-256 is kept in memory, `HttpOnly`, `SameSite=Strict`, `__Host-` prefix, new token at login, idle and absolute time-outs, all sessions revoked on password change/reset/disable |
 | Cross-site request forgery | Per-session token in every form, `Sec-Fetch-Site`/`Origin` check on every POST, `SameSite=Strict` |
-| Cross-site scripting, content injection | Contextual escaping by `html/template`, no JavaScript at all, CSP `default-src 'none'` with only same-origin styles and images, `nosniff` |
+| Cross-site scripting, content injection | Contextual escaping by `html/template`; CSP `default-src 'none'` with only same-origin script, styles and images – no inline script, style or event handler, no `eval`; the one script never inserts HTML; `nosniff`; theme and language preferences are validated against fixed lists before they reach a page |
+| SQL injection | Every value is a bound parameter, no SQL text is built from input; `LIKE` wildcards in search terms are escaped; a fuzz target cross-checks the SQL search against a reference matcher |
 | Click-jacking | `frame-ancestors 'none'`, `X-Frame-Options: DENY` |
 | A participant reading or changing another group's data | Role check on every route, object-level check on every report and request, queue actions limited to the user's own queue |
-| Forged sender or time | Both are taken from the session and the server clock, never from the form |
+| Forged sender or time | Both are taken from the session and the server clock, never from the form – for reports and chat messages alike |
+| Reading someone else's chat | A conversation is derived from the requester's own party and the peer in the URL; a conversation one is not part of cannot be named |
+| Covert reading of group chat by the exercise leader | Oversight is off by default, set only by the server operator, announced in every affected conversation and on every affected message, never retroactive, read-only, and logged per look |
+| Chat flooding | 20 messages per user per minute, 2 000 characters per message, the general request limits |
+| Script injection through chat | Messages are escaped by the template; the script appends new ones with `textContent` only |
 | Resource exhaustion | Request body limit 256 KiB, header limit 32 KiB, read/write/idle time-outs, field length limits, bounded session and throttle tables, `MemoryMax`/`TasksMax` in the unit |
-| Corrupt or malicious stored data | Journal parser is fuzzed; records are validated on replay; a damaged journal stops the start instead of being half-loaded |
-| Remote code execution in the server | Memory-safe language, no third-party code, and the sandbox layers below |
-| Supply-chain compromise | Zero third-party Go modules; only the Go standard library |
+| Corrupt stored data | SQLite integrity check at start; `STRICT` tables; a file that is not a database is refused, never overwritten; a damaged row fails loudly instead of being shown half-read |
+| Remote code execution in the server | Memory-safe language, no cgo and no C library in the process, and the sandbox layers below |
+| Misconfiguration going unnoticed | The configuration file is parsed strictly: an unknown, misspelt or mistyped setting stops the start instead of silently falling back to a default; `-print-config` shows what is in effect |
+| Supply-chain compromise | Three runtime dependencies (the pure-Go SQLite driver, `golang.org/x/crypto` and a YAML parser) with pinned, checksummed versions ([ADR 0010](adr/0010-vetted-dependencies.md)); the web interface has no third-party script, style or font |
 
 Out of scope: a malicious administrator or root user on the server, denial
 of service by flooding the network, and compromised participant devices.
@@ -38,10 +44,18 @@ of service by flooding the network, and compromised participant devices.
 | Read a report | own sent / received | all | |
 | Change status / folder of a report | own inbox | leader queue | |
 | Send and close requests | | ✔ | |
+| Chat: shared conversation | ✔ | ✔ | |
+| Chat: direct conversation | own group's | those with the leader | |
+| Chat: read a conversation between two groups | | only with oversight on, read-only, only messages sent under oversight | |
 | Create, edit, archive templates | | ✔ | ✔ |
 | Manage accounts | | | ✔ |
 
-The administrator deliberately has no access to reports.
+The administrator deliberately has no access to reports or chat. The
+exercise leader cannot read a direct conversation between two groups
+([ADR 0016](adr/0016-chat.md)) unless the operator has switched oversight
+on, in which case the groups are told in the conversation and on every
+affected message, earlier messages stay private, and each look is logged
+([ADR 0017](adr/0017-chat-oversight.md)).
 
 ## Defence in depth
 
@@ -68,7 +82,7 @@ the listening socket are open, and before the first connection is accepted
 | `RLIMIT_CORE=0`, `PR_SET_DUMPABLE=0` | No core dumps, no ptrace attach by same-user processes |
 | `PR_SET_NO_NEW_PRIVS` | No privilege gain through setuid or file capabilities |
 | Capabilities | Bounding, ambient, effective, permitted and inheritable sets emptied (after the port is bound) |
-| Landlock, file system | Everything denied except: data directory read/write (regular files only), TLS directories read-only |
+| Landlock, file system | Everything denied except: data directory read/write (regular files only – enough for SQLite's database, `-wal` and `-shm` files), TLS directories read-only |
 | Landlock, network (kernel ≥ 6.7) | Every new TCP `bind` and `connect` denied; abstract UNIX sockets scoped (≥ 6.12) |
 | seccomp-BPF | Deny-list, see below |
 
@@ -106,7 +120,7 @@ Modes (`-sandbox`):
 * `auto` (default) – apply everything the kernel supports and log what is
   missing.
 * `strict` – refuse to start unless every mechanism is active. This is the
-  setting in the shipped `gr_report.env`.
+  setting in the shipped `gr_report.yaml`.
 * `off` – development only.
 
 On macOS there is no in-process sandbox; the server logs that fact and
@@ -143,9 +157,10 @@ exists, so no program can be started.
 
 | Layer | Verification |
 | --- | --- |
-| Landlock, seccomp, capabilities, no_new_privs | Automated: `internal/sandbox` runs a child process under the sandbox and asserts that exec, sockets, connect, ptrace, setuid, writes outside the data directory and reads of `/etc/passwd` fail while journal writes keep working; `cmd/gr_report` runs the real binary sandboxed through login, writes and a certificate reload |
+| Landlock, seccomp, capabilities, no_new_privs | Automated: `internal/sandbox` runs a child process under the sandbox and asserts that exec, sockets, connect, ptrace, setuid, writes outside the data directory and reads of `/etc/passwd` fail while writes to the data directory keep working; `cmd/gr_report` runs the real binary sandboxed through login, writes and a certificate reload |
 | HTTP security controls | Automated integration tests (`internal/web`) for CSRF, origin checks, role and object access, cookie flags, headers, throttling, escaping |
-| Parsers and validators | Fuzz targets, see [testing.md](testing.md) |
+| Parsers, validators, SQL search | Fuzz targets, see [testing.md](testing.md) |
+| Sandbox with SQLite | The end-to-end test runs the real binary, with the SQLite engine, under Landlock and seccomp |
 | systemd unit | `systemd-analyze verify` and `systemd-analyze security` (`make verify-deploy`). Not exercised by the automated tests under a running systemd |
 | SELinux module | Compiles against the reference policy (`make verify-deploy`). **Not tested on an enforcing system** – run it in permissive mode first and check `ausearch -m avc` |
 | AppArmor profile | Parses with `apparmor_parser` (`make verify-deploy`). **Not tested in enforce mode** – check `journalctl -k | grep DENIED` after first start |
@@ -160,7 +175,18 @@ exists, so no program can be started.
 * The client address used for throttling is the TCP peer. Behind a reverse
   proxy all users share one address; run gr_report directly on the network
   or accept coarser throttling.
-* The journal is not encrypted at rest; protect the disk and the backups.
+* The database is not encrypted at rest; protect the disk and the backups.
+  This includes every chat conversation: whoever can read the database
+  file can read them, whatever the application's access rules say.
+* Chat messages are not written to the log, but the log does record who
+  sent a message in which conversation and when.
+* The language and theme cookies (`gr_lang`, `gr_theme`) are not
+  security-relevant; they are `HttpOnly`, `SameSite=Lax` and validated on
+  every request.
+* The page script is optional. With it, the guarantee against script
+  injection rests on the CSP allowing only the server's own origin and on
+  nothing user-controlled being served as script
+  ([ADR 0011](adr/0011-progressive-enhancement.md)).
 
 ## Reporting a vulnerability
 

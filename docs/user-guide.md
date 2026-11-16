@@ -4,8 +4,8 @@
 
 | Role | Who | Can do |
 | --- | --- | --- |
-| `group` | One account per participating group (or person) | Write reports, answer requests, read reports sent to the group |
-| `leader` | The exercise leader(s) | Work the report queue, send requests, create templates |
+| `group` | One account per participating group (or person) | Write reports, answer requests, read reports sent to the group, chat |
+| `leader` | The exercise leader(s) | Work the report queue, send requests, create templates, chat |
 | `admin` | Whoever runs the tool | Create and manage accounts, create templates |
 
 All exercise leaders share one queue. An account with the `group` role is
@@ -13,6 +13,71 @@ shared by the members of that group; its *display name* is what appears as
 the sender of a report.
 
 Times are shown in UTC (suffix `Z`).
+
+## Language and appearance
+
+Open **Settings** (also linked from the login page as *Language and
+appearance*) to choose:
+
+* the **language** – English or Swedish. Until you choose, your browser's
+  language is used;
+* the **colour theme** – system default, light, dark, high contrast, gold,
+  spring, autumn, camouflage or console green.
+
+Both are remembered in the browser you are using, not on the account, so
+everyone sharing a group account can have their own. See
+[accessibility.md](accessibility.md) for keyboard use, contrast and
+screen-reader support.
+
+This guide uses the English names of menus and buttons.
+
+## Chat
+
+**Chat** in the menu is for quick, informal messages; use reports for
+anything that should be on record.
+
+* **Everyone** – read by all groups and the exercise leader.
+* **Exercise leader** – a direct conversation between your group and the
+  exercise leaders. All leaders see it and any of them may answer.
+* **A group's name** – a direct conversation between your group and that
+  group. Normally nobody else can read it, not even the exercise leader –
+  unless *oversight* is switched on, see below.
+
+The line under the heading always says who can read the conversation you
+are looking at. Write in the box at the bottom and press **Send**. New
+messages appear by themselves within a few seconds (reload the page if your
+browser has JavaScript switched off). A red number next to a conversation,
+and next to **Chat** in the menu, counts unread messages.
+
+Remember that a group account is shared: everyone logged in to your group's
+account sees the group's conversations. Messages cannot be edited or
+deleted, are limited to 2 000 characters, and you can send at most 20 per
+minute. **Show earlier messages** pages back through the history.
+
+The person running the server can switch the chat off; the menu entry then
+disappears.
+
+### Oversight by the exercise leader
+
+An exercise can be run with **oversight** of the chat between groups. You
+can always tell:
+
+* a notice above the conversation says *Oversight is on: the exercise
+  leader can read the messages you send here*;
+* every message the exercise leader can read carries the tag *visible to
+  the exercise leader*.
+
+Only messages sent while oversight is on can be read by the exercise
+leader. Messages without the tag stay private, even if oversight is
+switched on later.
+
+**For exercise leaders:** with oversight on, the chat page lists
+*Oversight of group conversations* below your own conversations. Opening
+one shows the messages the two groups have exchanged under oversight. You
+can read but not write there – use the group's own conversation to contact
+a group. New messages appear by themselves within a few seconds, as in any
+conversation. Each time you open one, and each time new messages are shown
+to you, that is recorded in the server's audit log.
 
 ## Logging in
 
@@ -62,8 +127,13 @@ per group** plus *All queues*; the red badge counts new (unread) reports.
 * **Search** with one or more words; all words must occur in the subject,
   content, sender, template, folder or a field value.
 * **Sort** by clicking a column heading; click again to reverse.
-* **Auto-refresh** reloads the page every minute (switch it off while
-  ticking check boxes).
+* When new reports arrive while you have a page open, a notice appears at
+  the top and the counter in the menu updates – nothing you are typing or
+  have ticked is lost. Follow the link in the notice to see them.
+* **Auto-refresh** reloads the whole page every minute instead. It is meant
+  for browsers with JavaScript switched off; do not use it while ticking
+  check boxes.
+* The check box in the table heading selects all reports on the page.
 
 A report has a status:
 
@@ -98,8 +168,8 @@ sender, receiver, subject and content. A template adds:
   `number`, `select`, `checkbox`, `datetime`), a *required* flag, options
   (comma separated, for `select`) and a hint.
 
-Clear the label of a field to remove it. Use **Save and add more fields**
-for more empty rows. **Archive** hides a template from the groups; reports
+Clear the label of a field to remove it. **Add field** gives another empty
+row (without JavaScript: **Save and add more fields**). **Archive** hides a template from the groups; reports
 already written keep their content, and open requests that use the template
 can still be answered.
 

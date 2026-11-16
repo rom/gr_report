@@ -4,10 +4,10 @@
 
 * Linux, amd64 or arm64. Kernel 6.7 or newer gives the complete in-process
   sandbox (Landlock with network rules); older kernels work with
-  `GR_REPORT_SANDBOX=auto`.
+  `sandbox: auto`.
 * systemd for the provided service unit.
-* Go 1.24 or newer to build. The binary is static and has no run-time
-  dependencies.
+* Go 1.24 or newer to build (modules are downloaded on the first build).
+  The binary is static, includes SQLite and has no run-time dependencies.
 * `openssl` (self-signed certificates) or `certbot` (Let's Encrypt).
 
 ## Install
@@ -22,7 +22,7 @@ installs
 | --- | --- |
 | `/usr/local/bin/gr_report` | the binary |
 | `/etc/systemd/system/gr_report.service` | hardened service unit |
-| `/etc/gr_report/gr_report.env` | configuration (kept on re-install) |
+| `/etc/gr_report/gr_report.yaml` | all settings (kept on re-install) |
 | `/etc/gr_report/tls/` | certificate and key, `root:gr_report 0750` |
 | `/var/lib/gr_report/` | data, created by systemd, `gr_report 0700` |
 | user and group `gr_report` | unprivileged service account |
@@ -41,30 +41,103 @@ Log in as `admin`, change the password and delete that file.
 
 ## Configuration
 
-Every setting is a flag and an environment variable; flags win. The service
-reads `/etc/gr_report/gr_report.env`.
+All settings are in one YAML file, `/etc/gr_report/gr_report.yaml`. The
+installed file lists every setting with an explanation and its default; the
+service is started with `-config /etc/gr_report/gr_report.yaml`.
 
-| Flag | Environment | Default | Meaning |
-| --- | --- | --- | --- |
-| `-addr` | `GR_REPORT_ADDR` | `:8443` | Listen address `host:port` |
-| `-port` | `GR_REPORT_PORT` | – | Port; overrides the port of `-addr` |
-| `-data` | `GR_REPORT_DATA` | `./data` | Data directory |
-| `-tls-cert` | `GR_REPORT_TLS_CERT` | – | Certificate chain (PEM) |
-| `-tls-key` | `GR_REPORT_TLS_KEY` | – | Private key (PEM) |
-| `-sandbox` | `GR_REPORT_SANDBOX` | `auto` | `auto`, `strict` or `off` |
-| `-insecure-http` | `GR_REPORT_INSECURE_HTTP=1` | off | Plain HTTP, development only |
-| `-dev-seed` | – | off | Demo accounts; only with `-insecure-http` |
-| `-version` | – | | Print version |
+```yaml
+listen: ":8443"
+data_dir: /var/lib/gr_report
+tls:
+  cert: /etc/gr_report/tls/cert.pem
+  key: /etc/gr_report/tls/key.pem
+language: en
+chat:
+  enabled: true
+  oversight: false
+sandbox: strict
+development:
+  insecure_http: false
+  demo_accounts: false
+```
 
-Without `-tls-cert`/`-tls-key` the server refuses to start unless
-`-insecure-http` is given.
+| Setting | Default | Meaning | Environment | Flag |
+| --- | --- | --- | --- | --- |
+| `listen` | `:8443` | Listen address `host:port` | `GR_REPORT_ADDR` | `-addr` |
+| – | – | Port only; replaces the port of `listen` | `GR_REPORT_PORT` | `-port` |
+| `data_dir` | `./data` | Database, lock, initial admin password | `GR_REPORT_DATA` | `-data` |
+| `tls.cert` | – | Certificate chain (PEM) | `GR_REPORT_TLS_CERT` | `-tls-cert` |
+| `tls.key` | – | Private key (PEM) | `GR_REPORT_TLS_KEY` | `-tls-key` |
+| `language` | `en` | Default language, `en` or `sv` | `GR_REPORT_LANG` | `-lang` |
+| `chat.enabled` | `true` | Chat between participants | `GR_REPORT_CHAT` | `-chat` |
+| `chat.oversight` | `false` | Let the exercise leader read chat between groups | `GR_REPORT_CHAT_OVERSIGHT` | `-chat-oversight` |
+| `sandbox` | `auto` | `auto`, `strict` or `off` | `GR_REPORT_SANDBOX` | `-sandbox` |
+| `development.insecure_http` | `false` | Plain HTTP, development only | `GR_REPORT_INSECURE_HTTP` | `-insecure-http` |
+| `development.demo_accounts` | `false` | Demo accounts; needs insecure HTTP | – | `-dev-seed` |
+
+Rules:
+
+* **Precedence:** built-in default, then the file, then an environment
+  variable, then a flag. Environment variables and flags are meant for
+  development and one-off overrides; keep an installation's settings in the
+  file. Boolean environment variables accept `on`/`off`, `true`/`false`,
+  `1`/`0`, `yes`/`no`.
+* **Mistakes are errors.** An unknown or misspelt setting, a duplicate, or
+  a value of the wrong type stops the server from starting, with a message
+  naming the file and the setting.
+* **Relative paths** in the file are relative to the file's directory.
+* **Changes take effect at restart** (`systemctl restart gr_report`). Only
+  the TLS certificate is re-read on `systemctl reload`.
+* TLS is required: without `tls.cert` and `tls.key` the server refuses to
+  start unless `development.insecure_http` is on.
+* The file contains no secrets and can stay world-readable.
+
+Check a file, and see what is in effect after all overrides, without
+starting the server:
+
+```bash
+gr_report -config /etc/gr_report/gr_report.yaml -print-config
+```
+
+The file that was read is logged at start (`msg=configuration`).
+
+**Upgrading from a version that used `/etc/gr_report/gr_report.env`:**
+`make install` installs the new unit and `gr_report.yaml`. Copy your values
+from the old file into the YAML file, then delete the old one; the unit no
+longer reads it.
+
+### Chat oversight
+
+By default a conversation between two groups can be read by those two
+groups only. With `chat.oversight: true` the exercise leaders can
+read – not write – such conversations. The groups see a notice in the
+conversation and a tag on every message the leader can read.
+
+Oversight only covers messages sent while it is on. **Switch it on before
+the exercise starts** if you want it from the beginning; messages written
+earlier stay private and cannot be opened up afterwards. Switching it off
+closes the leaders' view at once. The setting takes effect at start, so
+changing it means restarting the service; its state is logged at start, and
+every look by a leader is logged as `event=chat_oversight_view` (with
+`live=true` when an open page received new messages).
+
+Tell the participants in the exercise instructions whether oversight is
+used.
+
+### Language
+
+Each user picks English or Swedish under **Settings**; until then the
+browser's language is used. The `language` setting decides what users see
+when their browser asks for neither, and the language of the two starter
+templates created on the very first start. Set it before the first start
+if you want Swedish starter templates.
 
 ### Running on a different port
 
 Set the port in the configuration and restart:
 
 ```bash
-sudo sed -i 's/^GR_REPORT_ADDR=.*/GR_REPORT_ADDR=:9443/' /etc/gr_report/gr_report.env
+sudo sed -i 's/^listen:.*/listen: ":9443"/' /etc/gr_report/gr_report.yaml
 ```
 
 ```bash
@@ -86,7 +159,7 @@ sudo install -D -m 0644 deploy/systemd/low-port.conf /etc/systemd/system/gr_repo
 sudo systemctl daemon-reload
 ```
 
-Then set `GR_REPORT_ADDR=:443` and restart. With SELinux also run
+Then set `listen: ":443"` and restart. With SELinux also run
 `setsebool -P gr_report_bind_low_ports on`.
 
 With SELinux, a port that is neither labelled `http_port_t` (80, 443, 8008,
@@ -179,7 +252,7 @@ journalctl -u gr_report | grep sandbox
 
 shows which in-process mechanisms are active, for example
 `no_new_privs=true caps_dropped=true landlock_abi=7 landlock_net=true
-seccomp=true`. With `GR_REPORT_SANDBOX=strict` the service does not start
+seccomp=true`. With `sandbox: strict` the service does not start
 unless all of them are.
 
 ```bash
@@ -190,21 +263,38 @@ rates the unit (expected: about 1.1, "OK").
 
 ## Backup and restore
 
-All state is the file `/var/lib/gr_report/journal.jsonl`. It is append-only
-and can be copied while the service runs; a copy taken mid-write at worst
-lacks the very last record.
+All state is the SQLite database `/var/lib/gr_report/gr_report.db`. While
+the service runs there are also `gr_report.db-wal` and `gr_report.db-shm`
+next to it; recent changes live in the `-wal` file, so **do not copy only
+the `.db` file of a running server**.
+
+Online backup, consistent and without stopping the service (needs the
+`sqlite3` command line tool):
 
 ```bash
-sudo cp /var/lib/gr_report/journal.jsonl /backup/gr_report-$(date +%F).jsonl
+sudo sqlite3 /var/lib/gr_report/gr_report.db ".backup '/backup/gr_report-$(date +%F).db'"
 ```
 
-Restore: stop the service, put the file back (owner `gr_report`, mode
-`0600`), start the service. The file is plain JSON lines and can be
-inspected with `jq`. It contains password hashes – treat backups as
-sensitive.
+Or stop the service and copy the file:
 
-To start a fresh exercise, stop the service and remove the data directory
-content; the next start creates a new administrator password.
+```bash
+sudo systemctl stop gr_report && sudo cp /var/lib/gr_report/gr_report.db /backup/ && sudo systemctl start gr_report
+```
+
+Restore: stop the service, remove `gr_report.db-wal` and
+`gr_report.db-shm`, put the backup in place as `gr_report.db` (owner
+`gr_report`, mode `0600`), start the service.
+
+The database contains password hashes and all chat conversations – treat
+backups as sensitive. It can
+be inspected with `sqlite3`, for example:
+
+```bash
+sudo sqlite3 -readonly /var/lib/gr_report/gr_report.db "SELECT status, COUNT(*) FROM reports GROUP BY status"
+```
+
+To start a fresh exercise, stop the service and remove the content of the
+data directory; the next start creates a new administrator password.
 
 ## Logs
 
@@ -222,8 +312,14 @@ journalctl -u gr_report | grep msg=audit
 git pull && sudo make install && sudo systemctl restart gr_report
 ```
 
+Password hashes made by an earlier version (PBKDF2) keep working and are
+converted to Argon2id the next time each user logs in.
+
 Sessions are kept in memory, so users log in again after a restart. The
-journal format is forward compatible within a major version.
+database schema is upgraded automatically at start (for example, the chat
+tables are added to a database created by an earlier version); take a backup first. A
+database that was written by a newer version is refused rather than
+downgraded.
 
 ## Troubleshooting
 
@@ -231,12 +327,19 @@ journal format is forward compatible within a major version.
 | --- | --- |
 | `TLS is required` at start | No certificate configured; create one or use `-insecure-http` for local development |
 | `data directory is in use by another process` | A second instance uses the same `-data` directory |
+| `schema version … is newer than this program supports` | The database was used with a newer gr_report; install that version or restore an older backup |
+| `configuration file: … line 2: field lissten not found …` | A misspelt or unknown setting in `gr_report.yaml`; the message gives the line and the name |
 | `sandbox could not be fully applied` | `strict` on a kernel without Landlock network support (< 6.7); use `auto` |
 | `listen … permission denied` | Port below 1024 without the drop-in, or SELinux port label missing |
 | Lost the only administrator password | See below |
 
-**Lost the only administrator password:** stop the service, open
-`journal.jsonl` as root and replace the `pass_hash` value of the `admin`
-record with the `pass_hash` of an account whose password you know. Start
-the service, log in as `admin` with that password and change it. Keeping a
-second administrator account avoids this.
+**Lost the only administrator password:** stop the service and copy the
+password hash of an account whose password you know onto the `admin`
+account:
+
+```bash
+sudo sqlite3 /var/lib/gr_report/gr_report.db "UPDATE users SET pass_hash = (SELECT pass_hash FROM users WHERE username = 'leader') WHERE username = 'admin'"
+```
+
+Start the service, log in as `admin` with that password and change it.
+Keeping a second administrator account avoids this.

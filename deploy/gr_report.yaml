@@ -1,0 +1,66 @@
+# gr_report configuration.
+#
+# Every setting of the server is in this file. The values below are what
+# `make install` puts in /etc/gr_report/gr_report.yaml; the comment on each
+# setting gives the built-in default used when the setting is left out.
+#
+# Start the server with:   gr_report -config /etc/gr_report/gr_report.yaml
+# Show what is in effect:  gr_report -config /etc/gr_report/gr_report.yaml -print-config
+#
+# An environment variable (GR_REPORT_...) overrides the file and a command
+# line flag overrides both; see docs/operations.md. Unknown settings are an
+# error, so a typing mistake does not go unnoticed. Changes take effect when
+# the service is restarted.
+
+# Address to listen on, as host:port. An empty host means all interfaces.
+# Ports below 1024 need deploy/systemd/low-port.conf.
+# Default: ":8443"
+listen: ":8443"
+
+# Directory for the database, the lock file and the initial administrator
+# password. A relative path is relative to this file.
+# Default: "./data"
+data_dir: /var/lib/gr_report
+
+# TLS certificate chain and private key (PEM). Create them with
+# scripts/mkcert-selfsigned.sh or scripts/mkcert-letsencrypt.sh. Both are
+# required unless development.insecure_http is on. Relative paths are
+# relative to this file. The files are re-read on `systemctl reload`.
+# Default: none
+tls:
+  cert: /etc/gr_report/tls/cert.pem
+  key: /etc/gr_report/tls/key.pem
+
+# Default language of the user interface, en or sv, for browsers that ask
+# for neither; also the language of the starter templates created on the
+# very first start. Each user can choose a language under Settings.
+# Default: en
+language: en
+
+chat:
+  # Chat between the participants.
+  # Default: true
+  enabled: true
+  # Let the exercise leader read chat between groups. The groups are told
+  # in each such conversation and on each such message, and only messages
+  # sent while this is on can be read. Switch it on before the exercise
+  # starts if you want it from the beginning.
+  # Default: false
+  oversight: false
+
+# In-process sandbox (Landlock, seccomp, capabilities): auto, strict or off.
+#   strict  refuse to start unless every mechanism is active (Linux >= 6.7)
+#   auto    use what the kernel offers and log what is missing
+#   off     development only
+# Default: auto
+sandbox: strict
+
+# For development on a local machine only. Never enable in an exercise.
+development:
+  # Serve plain HTTP without TLS: passwords and reports are unencrypted.
+  # Default: false
+  insecure_http: false
+  # Create the accounts admin, leader, alpha and bravo with a publicly
+  # known password on first start. Requires insecure_http.
+  # Default: false
+  demo_accounts: false

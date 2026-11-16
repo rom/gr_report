@@ -55,8 +55,15 @@ func TestEndToEndSandboxed(t *testing.T) {
 		t.Fatalf("key file: %v %v", fi, err)
 	}
 
-	cmd := exec.Command(bin, "-addr", "127.0.0.1:0", "-data", filepath.Join(dir, "data"),
-		"-tls-cert", filepath.Join(tlsDir, "cert.pem"), "-tls-key", filepath.Join(tlsDir, "key.pem"), "-sandbox", "auto")
+	// All settings come from a configuration file, with paths relative to
+	// it, as in an installation.
+	conf := filepath.Join(dir, "gr_report.yaml")
+	yaml := "listen: \"127.0.0.1:0\"\ndata_dir: data\ntls:\n  cert: tls/cert.pem\n  key: tls/key.pem\nsandbox: auto\nchat:\n  enabled: true\n  oversight: true\n"
+	if err := os.WriteFile(conf, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bin, "-config", conf)
+	cmd.Dir = "/" // relative paths must not depend on the working directory
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -89,6 +96,10 @@ func TestEndToEndSandboxed(t *testing.T) {
 			}
 		}
 	}
+	if l := waitLine(`msg=configuration`); !strings.Contains(l, conf) {
+		t.Errorf("configuration file not reported: %s", l)
+	}
+	waitLine(`chat oversight is on`)
 	sandboxLine := waitLine(`msg=sandbox`)
 	if !strings.Contains(sandboxLine, "seccomp=true") || !strings.Contains(sandboxLine, "no_new_privs=true") {
 		t.Errorf("sandbox not active: %s", sandboxLine)

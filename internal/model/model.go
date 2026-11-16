@@ -6,13 +6,14 @@ package model
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/rom/gr_report/internal/i18n"
 )
 
 // Size limits. They bound memory use and keep the journal small.
@@ -251,16 +252,16 @@ func CleanText(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func checkLen(what, s string, min, max int) error {
+func checkLen(what any, s string, min, max int) error {
 	n := utf8.RuneCountInString(s)
 	if n < min {
 		if min == 1 {
-			return fmt.Errorf("%s is required", what)
+			return i18n.Errorf("%s is required", what)
 		}
-		return fmt.Errorf("%s must be at least %d characters", what, min)
+		return i18n.Errorf("%s must be at least %d characters", what, min)
 	}
 	if n > max {
-		return fmt.Errorf("%s must be at most %d characters", what, max)
+		return i18n.Errorf("%s must be at most %d characters", what, max)
 	}
 	return nil
 }
@@ -270,13 +271,13 @@ func (u *User) Validate() error {
 	u.Username = strings.ToLower(strings.TrimSpace(u.Username))
 	u.DisplayName = CleanLine(u.DisplayName)
 	if !usernameRe.MatchString(u.Username) {
-		return errors.New("username must be 2-32 characters: a-z, 0-9, dot, dash, underscore")
+		return i18n.Errorf("username must be 2-32 characters: a-z, 0-9, dot, dash, underscore")
 	}
-	if err := checkLen("display name", u.DisplayName, 1, MaxNameLen); err != nil {
+	if err := checkLen(i18n.Label("display name"), u.DisplayName, 1, MaxNameLen); err != nil {
 		return err
 	}
 	if !u.Role.Valid() {
-		return errors.New("unknown role")
+		return i18n.Errorf("unknown role")
 	}
 	return nil
 }
@@ -325,34 +326,34 @@ func (t *Template) Validate() error {
 	t.Description = CleanText(t.Description)
 	t.DefaultSubject = CleanLine(t.DefaultSubject)
 	t.ContentHelp = CleanLine(t.ContentHelp)
-	if err := checkLen("template name", t.Name, 1, MaxNameLen); err != nil {
+	if err := checkLen(i18n.Label("template name"), t.Name, 1, MaxNameLen); err != nil {
 		return err
 	}
-	if err := checkLen("description", t.Description, 0, MaxDescriptionLen); err != nil {
+	if err := checkLen(i18n.Label("description"), t.Description, 0, MaxDescriptionLen); err != nil {
 		return err
 	}
-	if err := checkLen("default subject", t.DefaultSubject, 0, MaxSubjectLen); err != nil {
+	if err := checkLen(i18n.Label("default subject"), t.DefaultSubject, 0, MaxSubjectLen); err != nil {
 		return err
 	}
-	if err := checkLen("content help", t.ContentHelp, 0, MaxSubjectLen); err != nil {
+	if err := checkLen(i18n.Label("content help"), t.ContentHelp, 0, MaxSubjectLen); err != nil {
 		return err
 	}
 	if len(t.Fields) > MaxFields {
-		return fmt.Errorf("a template can have at most %d fields", MaxFields)
+		return i18n.Errorf("a template can have at most %d fields", MaxFields)
 	}
 	seen := map[string]bool{}
 	for i := range t.Fields {
 		f := &t.Fields[i]
 		f.Label = CleanLine(f.Label)
 		f.Help = CleanLine(f.Help)
-		if err := checkLen("field label", f.Label, 1, MaxNameLen); err != nil {
+		if err := checkLen(i18n.Label("field label"), f.Label, 1, MaxNameLen); err != nil {
 			return err
 		}
-		if err := checkLen("field help", f.Help, 0, MaxSubjectLen); err != nil {
+		if err := checkLen(i18n.Label("field help"), f.Help, 0, MaxSubjectLen); err != nil {
 			return err
 		}
 		if !f.Type.Valid() {
-			return fmt.Errorf("field %q: unknown type", f.Label)
+			return i18n.Errorf("field %q: unknown type", f.Label)
 		}
 		if f.Key == "" {
 			f.Key = KeyFromLabel(f.Label)
@@ -361,7 +362,7 @@ func (t *Template) Validate() error {
 			f.Key = "field"
 		}
 		if !keyRe.MatchString(f.Key) {
-			return fmt.Errorf("field %q: invalid key", f.Label)
+			return i18n.Errorf("field %q: invalid key", f.Label)
 		}
 		base := f.Key
 		for n := 2; seen[f.Key]; n++ {
@@ -381,14 +382,14 @@ func (t *Template) Validate() error {
 			}
 			f.Options = clean
 			if len(f.Options) == 0 {
-				return fmt.Errorf("field %q: a select field needs options", f.Label)
+				return i18n.Errorf("field %q: a select field needs options", f.Label)
 			}
 			if len(f.Options) > MaxOptions {
-				return fmt.Errorf("field %q: at most %d options", f.Label, MaxOptions)
+				return i18n.Errorf("field %q: at most %d options", f.Label, MaxOptions)
 			}
 			for _, o := range f.Options {
-				if err := checkLen("option", o, 1, MaxNameLen); err != nil {
-					return fmt.Errorf("field %q: %w", f.Label, err)
+				if err := checkLen(i18n.Label("option"), o, 1, MaxNameLen); err != nil {
+					return i18n.Errorf("field %q: %s", f.Label, err)
 				}
 			}
 		} else {
@@ -402,21 +403,21 @@ func (t *Template) Validate() error {
 func (q *Request) Validate() error {
 	q.Subject = CleanLine(q.Subject)
 	q.Body = CleanText(q.Body)
-	if err := checkLen("subject", q.Subject, 1, MaxSubjectLen); err != nil {
+	if err := checkLen(i18n.Label("subject"), q.Subject, 1, MaxSubjectLen); err != nil {
 		return err
 	}
-	if err := checkLen("message", q.Body, 0, MaxContentLen); err != nil {
+	if err := checkLen(i18n.Label("message"), q.Body, 0, MaxContentLen); err != nil {
 		return err
 	}
 	if !ValidID(q.TemplateID) {
-		return errors.New("a report template must be attached")
+		return i18n.Errorf("a report template must be attached")
 	}
 	if len(q.Recipients) > MaxRecipients {
-		return errors.New("too many recipients")
+		return i18n.Errorf("too many recipients")
 	}
 	for _, id := range q.Recipients {
 		if !ValidID(id) {
-			return errors.New("invalid recipient")
+			return i18n.Errorf("invalid recipient")
 		}
 	}
 	return nil
@@ -425,7 +426,7 @@ func (q *Request) Validate() error {
 // CleanFolder normalises a folder name used when filing reports.
 func CleanFolder(s string) (string, error) {
 	s = CleanLine(s)
-	if err := checkLen("folder", s, 0, MaxFolderLen); err != nil {
+	if err := checkLen(i18n.Label("folder"), s, 0, MaxFolderLen); err != nil {
 		return "", err
 	}
 	return s, nil
@@ -440,10 +441,10 @@ const DatetimeLayout = "2006-01-02T15:04"
 func FillReport(r *Report, t *Template, subject, content string, get func(key string) string) error {
 	r.Subject = CleanLine(subject)
 	r.Content = CleanText(content)
-	if err := checkLen("subject", r.Subject, 1, MaxSubjectLen); err != nil {
+	if err := checkLen(i18n.Label("subject"), r.Subject, 1, MaxSubjectLen); err != nil {
 		return err
 	}
-	if err := checkLen("content", r.Content, 1, MaxContentLen); err != nil {
+	if err := checkLen(i18n.Label("content"), r.Content, 1, MaxContentLen); err != nil {
 		return err
 	}
 	r.TemplateID, r.TemplateName = t.ID, t.Name
@@ -466,25 +467,25 @@ func FillReport(r *Report, t *Template, subject, content string, get func(key st
 				v = "no"
 			}
 			if f.Required && v != "yes" {
-				return fmt.Errorf("%s must be checked", f.Label)
+				return i18n.Errorf("%s must be checked", f.Label)
 			}
 		case FieldNumber:
 			if v != "" && !isNumber(v) {
-				return fmt.Errorf("%s must be a number", f.Label)
+				return i18n.Errorf("%s must be a number", f.Label)
 			}
 		case FieldDatetime:
 			if v != "" {
 				if _, err := time.Parse(DatetimeLayout, v); err != nil {
-					return fmt.Errorf("%s must be a date and time", f.Label)
+					return i18n.Errorf("%s must be a date and time", f.Label)
 				}
 			}
 		case FieldSelect:
 			if v != "" && !contains(f.Options, v) {
-				return fmt.Errorf("%s: not a valid choice", f.Label)
+				return i18n.Errorf("%s: not a valid choice", f.Label)
 			}
 		}
 		if f.Required && v == "" {
-			return fmt.Errorf("%s is required", f.Label)
+			return i18n.Errorf("%s is required", f.Label)
 		}
 		r.Fields = append(r.Fields, FieldValue{Key: f.Key, Label: f.Label, Value: v})
 	}
