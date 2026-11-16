@@ -1,52 +1,53 @@
 {{define "content"}}
 {{$d := .Data}}
-<h1>New report <span class="muted">· {{$d.Template.Name}}</span></h1>
+<h1>{{$.T "New report"}} <span class="muted">· {{$d.Template.Name}}</span></h1>
 {{if $d.Request}}
 <div class="panel">
-  <strong>Answer to request: <a href="/requests/{{$d.Request.ID}}">{{$d.Request.Subject}}</a></strong>
+  <strong>{{$.T "Answer to request:"}} <a href="/requests/{{$d.Request.ID}}">{{$d.Request.Subject}}</a></strong>
   {{if $d.Request.Body}}<p class="body">{{$d.Request.Body}}</p>{{end}}
 </div>
 {{end}}
 {{if $d.Template.Description}}<p class="body muted">{{$d.Template.Description}}</p>{{end}}
-<form class="panel" method="post" action="/reports">
+<form class="panel" method="post" action="/reports"{{if .Error}} aria-describedby="error"{{end}}>
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <input type="hidden" name="template" value="{{$d.Template.ID}}">
   {{if $d.Request}}<input type="hidden" name="request" value="{{$d.Request.ID}}">{{end}}
+  <p class="help"><span class="req" aria-hidden="true">*</span> {{$.T "marks a required field"}}</p>
   <dl class="meta">
-    <dt>From</dt><dd>{{.User.DisplayName}}</dd>
-    <dt>Time</dt><dd>set by the server when the report is sent</dd>
+    <dt>{{$.T "From"}}</dt><dd>{{.User.DisplayName}}</dd>
+    <dt>{{$.T "Time"}}</dt><dd>{{$.T "set by the server when the report is sent"}}</dd>
   </dl>
-  <label for="receiver">To</label>
+  <label for="receiver">{{$.T "To"}}</label>
   {{if $d.Request}}
-  <input type="text" id="receiver" value="Exercise leader" disabled>
+  <input type="text" id="receiver" value="{{$.T "Exercise leader"}}" disabled>
   {{else}}
   <select id="receiver" name="receiver">
-    <option value="leader">Exercise leader</option>
+    <option value="leader">{{$.T "Exercise leader"}}</option>
     {{range $d.Receivers}}<option value="{{.ID}}"{{if eq .ID $d.Receiver}} selected{{end}}>{{.DisplayName}}</option>{{end}}
   </select>
   {{end}}
-  <label for="subject">Subject</label>
+  <label for="subject">{{$.T "Subject"}} <span class="req" aria-hidden="true">*</span></label>
   <input type="text" id="subject" name="subject" value="{{$d.Subject}}" maxlength="200" required>
   {{range $d.Template.Fields}}
     {{$v := index $d.Values .Key}}
     {{if eq .Type "checkbox"}}
-    <label class="inline" for="f_{{.Key}}"><input type="checkbox" id="f_{{.Key}}" name="f_{{.Key}}" value="yes"{{if $v}} checked{{end}}> <strong>{{.Label}}</strong></label>
-    {{if .Help}}<div class="help">{{.Help}}</div>{{end}}
+    <label class="inline" for="f_{{.Key}}"><input type="checkbox" id="f_{{.Key}}" name="f_{{.Key}}" value="yes"{{if $v}} checked{{end}}{{if .Required}} required{{end}}{{if .Help}} aria-describedby="h_{{.Key}}"{{end}}> <strong>{{.Label}}</strong>{{if .Required}} <span class="req" aria-hidden="true">*</span>{{end}}</label>
+    {{if .Help}}<div class="help" id="h_{{.Key}}">{{.Help}}</div>{{end}}
     {{else}}
-    <label for="f_{{.Key}}">{{.Label}}{{if .Required}} *{{end}}{{if .Help}} <span class="help">{{.Help}}</span>{{end}}</label>
-    {{if eq .Type "textarea"}}<textarea id="f_{{.Key}}" name="f_{{.Key}}" maxlength="4000"{{if .Required}} required{{end}}>{{$v}}</textarea>
-    {{else if eq .Type "select"}}<select id="f_{{.Key}}" name="f_{{.Key}}"{{if .Required}} required{{end}}>
-      <option value="">– choose –</option>
+    <label for="f_{{.Key}}">{{.Label}}{{if .Required}} <span class="req" aria-hidden="true">*</span>{{end}}{{if .Help}} <span class="help" id="h_{{.Key}}">{{.Help}}</span>{{end}}</label>
+    {{if eq .Type "textarea"}}<textarea id="f_{{.Key}}" name="f_{{.Key}}" maxlength="4000"{{if .Required}} required{{end}}{{if .Help}} aria-describedby="h_{{.Key}}"{{end}}>{{$v}}</textarea>
+    {{else if eq .Type "select"}}<select id="f_{{.Key}}" name="f_{{.Key}}"{{if .Required}} required{{end}}{{if .Help}} aria-describedby="h_{{.Key}}"{{end}}>
+      <option value="">{{$.T "– choose –"}}</option>
       {{range .Options}}<option{{if eq . $v}} selected{{end}}>{{.}}</option>{{end}}
     </select>
-    {{else if eq .Type "datetime"}}<input type="datetime-local" id="f_{{.Key}}" name="f_{{.Key}}" value="{{$v}}"{{if .Required}} required{{end}}>
-    {{else if eq .Type "number"}}<input type="text" inputmode="decimal" id="f_{{.Key}}" name="f_{{.Key}}" value="{{$v}}"{{if .Required}} required{{end}}>
-    {{else}}<input type="text" id="f_{{.Key}}" name="f_{{.Key}}" value="{{$v}}" maxlength="4000"{{if .Required}} required{{end}}>
+    {{else if eq .Type "datetime"}}<input type="datetime-local" id="f_{{.Key}}" name="f_{{.Key}}" value="{{$v}}"{{if .Required}} required{{end}}{{if .Help}} aria-describedby="h_{{.Key}}"{{end}}>
+    {{else if eq .Type "number"}}<input type="text" inputmode="decimal" id="f_{{.Key}}" name="f_{{.Key}}" value="{{$v}}"{{if .Required}} required{{end}}{{if .Help}} aria-describedby="h_{{.Key}}"{{end}}>
+    {{else}}<input type="text" id="f_{{.Key}}" name="f_{{.Key}}" value="{{$v}}" maxlength="4000"{{if .Required}} required{{end}}{{if .Help}} aria-describedby="h_{{.Key}}"{{end}}>
     {{end}}
     {{end}}
   {{end}}
-  <label for="content">Content{{if $d.Template.ContentHelp}} <span class="help">{{$d.Template.ContentHelp}}</span>{{end}}</label>
-  <textarea class="big" id="content" name="content" maxlength="20000" required>{{$d.Content}}</textarea>
-  <div class="actions"><button>Send report</button> <a href="/home">Cancel</a></div>
+  <label for="content">{{$.T "Content"}} <span class="req" aria-hidden="true">*</span>{{if $d.Template.ContentHelp}} <span class="help" id="content-help">{{$d.Template.ContentHelp}}</span>{{end}}</label>
+  <textarea class="big" id="content" name="content" maxlength="20000" required{{if $d.Template.ContentHelp}} aria-describedby="content-help"{{end}}>{{$d.Content}}</textarea>
+  <div class="actions"><button>{{$.T "Send report"}}</button> <a href="/home">{{$.T "Cancel"}}</a></div>
 </form>
 {{end}}

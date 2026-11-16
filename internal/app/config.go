@@ -10,6 +10,7 @@ import (
 	"net"
 	"strconv"
 
+	"github.com/rom/gr_report/internal/i18n"
 	"github.com/rom/gr_report/internal/sandbox"
 )
 
@@ -26,7 +27,10 @@ type Config struct {
 	InsecureHTTP bool
 	DevSeed      bool
 	Sandbox      sandbox.Mode
-	ShowVersion  bool
+	// Lang is the default user interface language, used when a browser
+	// states no preference, and the language of the starter templates.
+	Lang        i18n.Lang
+	ShowVersion bool
 }
 
 // ErrHelp is returned when -h was given; usage has been printed.
@@ -41,7 +45,7 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 		return def
 	}
 	var cfg Config
-	var port, mode string
+	var port, mode, lang string
 	fs := flag.NewFlagSet("gr_report", flag.ContinueOnError)
 	fs.SetOutput(out)
 	fs.StringVar(&cfg.Addr, "addr", env("GR_REPORT_ADDR", ":8443"), "listen `address` as host:port (env GR_REPORT_ADDR)")
@@ -52,6 +56,7 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	fs.BoolVar(&cfg.InsecureHTTP, "insecure-http", env("GR_REPORT_INSECURE_HTTP", "") == "1", "serve plain HTTP without TLS; development only (env GR_REPORT_INSECURE_HTTP=1)")
 	fs.BoolVar(&cfg.DevSeed, "dev-seed", false, "create demo accounts with a known password on first start; needs -insecure-http")
 	fs.StringVar(&mode, "sandbox", env("GR_REPORT_SANDBOX", string(sandbox.ModeAuto)), "in-process sandbox `mode`: auto, strict or off (env GR_REPORT_SANDBOX)")
+	fs.StringVar(&lang, "lang", env("GR_REPORT_LANG", string(i18n.EN)), "default user interface `language`: en or sv (env GR_REPORT_LANG)")
 	fs.BoolVar(&cfg.ShowVersion, "version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
@@ -65,6 +70,10 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	var err error
 	if cfg.Sandbox, err = sandbox.ParseMode(mode); err != nil {
 		return cfg, err
+	}
+	var ok bool
+	if cfg.Lang, ok = i18n.Parse(lang); !ok {
+		return cfg, fmt.Errorf("unsupported language %q (want en or sv)", lang)
 	}
 	host, addrPort, err := net.SplitHostPort(cfg.Addr)
 	if err != nil {

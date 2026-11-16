@@ -14,6 +14,23 @@ the sender of a report.
 
 Times are shown in UTC (suffix `Z`).
 
+## Language and appearance
+
+Open **Settings** (also linked from the login page as *Language and
+appearance*) to choose:
+
+* the **language** – English or Swedish. Until you choose, your browser's
+  language is used;
+* the **colour theme** – system default, light, dark, high contrast, gold,
+  spring, autumn, camouflage or console green.
+
+Both are remembered in the browser you are using, not on the account, so
+everyone sharing a group account can have their own. See
+[accessibility.md](accessibility.md) for keyboard use, contrast and
+screen-reader support.
+
+This guide uses the English names of menus and buttons.
+
 ## Logging in
 
 Open the address you were given and log in with your username and password.
@@ -62,8 +79,13 @@ per group** plus *All queues*; the red badge counts new (unread) reports.
 * **Search** with one or more words; all words must occur in the subject,
   content, sender, template, folder or a field value.
 * **Sort** by clicking a column heading; click again to reverse.
-* **Auto-refresh** reloads the page every minute (switch it off while
-  ticking check boxes).
+* When new reports arrive while you have a page open, a notice appears at
+  the top and the counter in the menu updates – nothing you are typing or
+  have ticked is lost. Follow the link in the notice to see them.
+* **Auto-refresh** reloads the whole page every minute instead. It is meant
+  for browsers with JavaScript switched off; do not use it while ticking
+  check boxes.
+* The check box in the table heading selects all reports on the page.
 
 A report has a status:
 
@@ -98,8 +120,8 @@ sender, receiver, subject and content. A template adds:
   `number`, `select`, `checkbox`, `datetime`), a *required* flag, options
   (comma separated, for `select`) and a hint.
 
-Clear the label of a field to remove it. Use **Save and add more fields**
-for more empty rows. **Archive** hides a template from the groups; reports
+Clear the label of a field to remove it. **Add field** gives another empty
+row (without JavaScript: **Save and add more fields**). **Archive** hides a template from the groups; reports
 already written keep their content, and open requests that use the template
 can still be answered.
 

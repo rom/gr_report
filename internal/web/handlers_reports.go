@@ -1,12 +1,12 @@
 package web
 
 import (
-	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"time"
 
+	"github.com/rom/gr_report/internal/i18n"
 	"github.com/rom/gr_report/internal/model"
 )
 
@@ -38,7 +38,7 @@ func (s *Server) home(c *reqCtx) {
 	if len(v.Recent) > 10 {
 		v.Recent = v.Recent[:10]
 	}
-	s.render(c, http.StatusOK, "home", "Home", v, "")
+	s.render(c, http.StatusOK, "home", c.t("Home"), v, "")
 }
 
 // ---- writing a report ----
@@ -60,20 +60,20 @@ func (s *Server) reportContext(c *reqCtx, templateID, requestID string) (*report
 	if requestID != "" {
 		q, ok := s.Store.Request(requestID)
 		if !ok || !q.Addressed(c.user.ID) {
-			s.fail(c, http.StatusNotFound, "No such request.")
+			s.fail(c, http.StatusNotFound, c.t("No such request."))
 			return nil, false
 		}
 		if q.Closed {
-			s.fail(c, http.StatusUnprocessableEntity, "This request is closed.")
+			s.fail(c, http.StatusUnprocessableEntity, c.t("This request is closed."))
 			return nil, false
 		}
 		v.Request = &q
 		templateID = q.TemplateID
-		v.Subject = "Re: " + q.Subject
+		v.Subject = c.t("Re: %s", q.Subject)
 	}
 	t, ok := s.Store.Template(templateID)
 	if !ok || (t.Archived && v.Request == nil) {
-		s.fail(c, http.StatusNotFound, "No such template.")
+		s.fail(c, http.StatusNotFound, c.t("No such template."))
 		return nil, false
 	}
 	v.Template = t
@@ -94,7 +94,7 @@ func (s *Server) reportForm(c *reqCtx) {
 	if !ok {
 		return
 	}
-	s.render(c, http.StatusOK, "report_new", "New report", v, "")
+	s.render(c, http.StatusOK, "report_new", c.t("New report"), v, "")
 }
 
 func (s *Server) reportCreate(c *reqCtx) {
@@ -112,7 +112,7 @@ func (s *Server) reportCreate(c *reqCtx) {
 		v.Values[fd.Key] = f.Get("f_" + fd.Key)
 	}
 	bad := func(msg string) {
-		s.render(c, http.StatusUnprocessableEntity, "report_new", "New report", v, msg)
+		s.render(c, http.StatusUnprocessableEntity, "report_new", c.t("New report"), v, msg)
 	}
 	if v.Request != nil {
 		r.RequestID = v.Request.ID
@@ -120,20 +120,24 @@ func (s *Server) reportCreate(c *reqCtx) {
 		v.Receiver = rcv
 		g, ok := s.Store.User(rcv)
 		if !ok || g.Role != model.RoleGroup || g.Disabled || g.ID == c.user.ID {
-			bad("Unknown receiver.")
+			bad(c.t("Unknown receiver."))
 			return
 		}
 		r.ReceiverID, r.ReceiverName = g.ID, g.DisplayName
 	}
 	if err := model.FillReport(&r, &v.Template, v.Subject, v.Content, func(k string) string { return v.Values[k] }); err != nil {
-		bad(err.Error())
+		bad(i18n.TErr(c.lang, err))
 		return
 	}
 	if s.storeErr(c, s.Store.PutReport(r)) {
 		return
 	}
 	s.audit(c, "report_sent", "report", r.ID, "receiver", r.ReceiverID)
-	s.redirect(c, "/reports/"+r.ID, "Report sent to "+r.ReceiverName+".")
+	to := r.ReceiverName
+	if r.ReceiverID == model.ReceiverLeader {
+		to = c.t(model.ReceiverLeaderName)
+	}
+	s.redirect(c, "/reports/"+r.ID, c.t("Report sent to %s.", to))
 }
 
 // ---- viewing and filing ----
@@ -151,7 +155,7 @@ func (s *Server) reportView(c *reqCtx) {
 	// Leaders may read everything; groups only what they sent or received.
 	visible := mine || r.SenderID == c.user.ID || c.user.Role == model.RoleLeader
 	if !ok || !visible {
-		s.fail(c, http.StatusNotFound, "No such report.")
+		s.fail(c, http.StatusNotFound, c.t("No such report."))
 		return
 	}
 	if mine && r.Status == model.StatusNew {
@@ -186,14 +190,14 @@ func (s *Server) applyStatus(c *reqCtx, ids []string, action, folder string) (in
 	case "file":
 		status = model.StatusFiled
 	default:
-		return 0, fmt.Errorf("choose an action")
+		return 0, i18n.Errorf("choose an action")
 	}
 	folder, err := model.CleanFolder(folder)
 	if err != nil {
 		return 0, err
 	}
 	if len(ids) > 5*pageSize {
-		return 0, fmt.Errorf("too many reports selected")
+		return 0, i18n.Errorf("too many reports selected")
 	}
 	mine := queueID(&c.user)
 	n := 0
@@ -224,19 +228,19 @@ func (s *Server) reportStatus(c *reqCtx) {
 	id := c.r.PathValue("id")
 	n, err := s.applyStatus(c, []string{id}, c.r.PostForm.Get("action"), c.r.PostForm.Get("folder"))
 	if err != nil {
-		s.fail(c, http.StatusUnprocessableEntity, err.Error())
+		s.fail(c, http.StatusUnprocessableEntity, i18n.TErr(c.lang, err))
 		return
 	}
 	if n == 0 {
-		s.fail(c, http.StatusNotFound, "No such report.")
+		s.fail(c, http.StatusNotFound, c.t("No such report."))
 		return
 	}
 	if c.r.PostForm.Get("action") == "new" {
 		// Opening the report again would mark it read: go to the queue.
-		s.redirect(c, "/queue", "Report marked as new.")
+		s.redirect(c, "/queue", c.t("Report marked as new."))
 		return
 	}
-	s.redirect(c, "/reports/"+id, "Report updated.")
+	s.redirect(c, "/reports/"+id, c.t("Report updated."))
 }
 
 func (s *Server) queueBulk(c *reqCtx) {
@@ -247,10 +251,10 @@ func (s *Server) queueBulk(c *reqCtx) {
 	}
 	n, err := s.applyStatus(c, f["id"], f.Get("action"), f.Get("folder"))
 	if err != nil {
-		s.redirect(c, back, "Nothing changed: "+err.Error()+".")
+		s.redirect(c, back, c.t("Nothing changed: %s.", i18n.TErr(c.lang, err)))
 		return
 	}
-	s.redirect(c, back, fmt.Sprintf("%d report(s) updated.", n))
+	s.redirect(c, back, c.t("%d report(s) updated.", n))
 }
 
 // ---- queue ----
@@ -278,8 +282,10 @@ func parseQueueParams(v url.Values) queueParams {
 	if !model.Status(p.Status).Valid() {
 		p.Status = ""
 	}
-	if len(p.Q) > model.MaxSubjectLen {
-		p.Q = p.Q[:model.MaxSubjectLen]
+	// Cut on a character boundary and clean again: the cut may expose
+	// trailing white space.
+	if r := []rune(p.Q); len(r) > model.MaxSubjectLen {
+		p.Q = model.CleanLine(string(r[:model.MaxSubjectLen]))
 	}
 	if len(p.Folder) > model.MaxSubjectLen {
 		p.Folder = ""
@@ -349,6 +355,7 @@ type queueLink struct {
 
 type sortLink struct {
 	Label, URL, Arrow string
+	Aria              string // value of aria-sort
 }
 
 type queueView struct {
@@ -384,16 +391,16 @@ func (s *Server) list(c *reqCtx, sent bool) {
 	if to := model.ParseDay(p.To); !to.IsZero() {
 		f.To = to.Add(24 * time.Hour)
 	}
-	title := "Inbox"
+	title := c.t("Inbox")
 	if sent {
-		v.Base, title = "/sent", "Sent reports"
+		v.Base, title = "/sent", c.t("Sent reports")
 		f.SenderID = c.user.ID
 		p.Group, v.P.Group = "", ""
 	} else {
 		f.ReceiverID, f.SenderID = queueID(&c.user), p.Group
 		stats := s.Store.Stats(f.ReceiverID)
 		v.Folders = stats.Folders
-		all := queueLink{Name: "All queues", Active: p.Group == ""}
+		all := queueLink{Name: c.t("All queues"), Active: p.Group == ""}
 		one := p
 		one.Page = 0
 		for _, g := range s.Store.Users() {
@@ -418,7 +425,7 @@ func (s *Server) list(c *reqCtx, sent bool) {
 		all.URL = one.link(v.Base)
 		v.Queues = append([]queueLink{all}, v.Queues...)
 		if c.user.Role == model.RoleLeader {
-			title = "Report queue"
+			title = c.t("Report queue")
 			v.Requests = s.Store.Requests()
 		}
 	}
@@ -439,12 +446,12 @@ func (s *Server) list(c *reqCtx, sent bool) {
 	for _, k := range model.SortKeys {
 		sp := p
 		sp.Page, sp.Sort, sp.Asc = 0, k, false
-		l := sortLink{Label: labels[k]}
+		l := sortLink{Label: c.t(labels[k]), Aria: "none"}
 		if k == p.Sort {
 			sp.Asc = !p.Asc
-			l.Arrow = "▼"
+			l.Arrow, l.Aria = "▼", "descending"
 			if p.Asc {
-				l.Arrow = "▲"
+				l.Arrow, l.Aria = "▲", "ascending"
 			}
 		}
 		l.URL = sp.link(v.Base)

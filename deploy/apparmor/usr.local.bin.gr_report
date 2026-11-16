@@ -20,7 +20,8 @@ profile gr_report /usr/{local/,}bin/gr_report flags=(attach_disconnected) {
   /etc/gr_report/ r,
   /etc/gr_report/** r,
 
-  # Data directory: journal, lock file, initial admin password.
+  # Data directory: SQLite database (plus -wal and -shm), lock file,
+  # initial admin password.
   owner /var/lib/gr_report/ rw,
   owner /var/lib/gr_report/** rwk,
 

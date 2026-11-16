@@ -6,8 +6,8 @@
   sandbox (Landlock with network rules); older kernels work with
   `GR_REPORT_SANDBOX=auto`.
 * systemd for the provided service unit.
-* Go 1.24 or newer to build. The binary is static and has no run-time
-  dependencies.
+* Go 1.24 or newer to build (modules are downloaded on the first build).
+  The binary is static, includes SQLite and has no run-time dependencies.
 * `openssl` (self-signed certificates) or `certbot` (Let's Encrypt).
 
 ## Install
@@ -52,12 +52,21 @@ reads `/etc/gr_report/gr_report.env`.
 | `-tls-cert` | `GR_REPORT_TLS_CERT` | – | Certificate chain (PEM) |
 | `-tls-key` | `GR_REPORT_TLS_KEY` | – | Private key (PEM) |
 | `-sandbox` | `GR_REPORT_SANDBOX` | `auto` | `auto`, `strict` or `off` |
+| `-lang` | `GR_REPORT_LANG` | `en` | Default language, `en` or `sv` |
 | `-insecure-http` | `GR_REPORT_INSECURE_HTTP=1` | off | Plain HTTP, development only |
 | `-dev-seed` | – | off | Demo accounts; only with `-insecure-http` |
 | `-version` | – | | Print version |
 
 Without `-tls-cert`/`-tls-key` the server refuses to start unless
 `-insecure-http` is given.
+
+### Language
+
+Each user picks English or Swedish under **Settings**; until then the
+browser's language is used. `-lang` / `GR_REPORT_LANG` sets what users see
+when their browser asks for neither, and the language of the two starter
+templates created on the very first start. Set it before the first start
+if you want Swedish starter templates.
 
 ### Running on a different port
 
@@ -190,21 +199,37 @@ rates the unit (expected: about 1.1, "OK").
 
 ## Backup and restore
 
-All state is the file `/var/lib/gr_report/journal.jsonl`. It is append-only
-and can be copied while the service runs; a copy taken mid-write at worst
-lacks the very last record.
+All state is the SQLite database `/var/lib/gr_report/gr_report.db`. While
+the service runs there are also `gr_report.db-wal` and `gr_report.db-shm`
+next to it; recent changes live in the `-wal` file, so **do not copy only
+the `.db` file of a running server**.
+
+Online backup, consistent and without stopping the service (needs the
+`sqlite3` command line tool):
 
 ```bash
-sudo cp /var/lib/gr_report/journal.jsonl /backup/gr_report-$(date +%F).jsonl
+sudo sqlite3 /var/lib/gr_report/gr_report.db ".backup '/backup/gr_report-$(date +%F).db'"
 ```
 
-Restore: stop the service, put the file back (owner `gr_report`, mode
-`0600`), start the service. The file is plain JSON lines and can be
-inspected with `jq`. It contains password hashes – treat backups as
-sensitive.
+Or stop the service and copy the file:
 
-To start a fresh exercise, stop the service and remove the data directory
-content; the next start creates a new administrator password.
+```bash
+sudo systemctl stop gr_report && sudo cp /var/lib/gr_report/gr_report.db /backup/ && sudo systemctl start gr_report
+```
+
+Restore: stop the service, remove `gr_report.db-wal` and
+`gr_report.db-shm`, put the backup in place as `gr_report.db` (owner
+`gr_report`, mode `0600`), start the service.
+
+The database contains password hashes – treat backups as sensitive. It can
+be inspected with `sqlite3`, for example:
+
+```bash
+sudo sqlite3 -readonly /var/lib/gr_report/gr_report.db "SELECT status, COUNT(*) FROM reports GROUP BY status"
+```
+
+To start a fresh exercise, stop the service and remove the content of the
+data directory; the next start creates a new administrator password.
 
 ## Logs
 
@@ -223,7 +248,9 @@ git pull && sudo make install && sudo systemctl restart gr_report
 ```
 
 Sessions are kept in memory, so users log in again after a restart. The
-journal format is forward compatible within a major version.
+database schema is upgraded automatically at start; take a backup first. A
+database that was written by a newer version is refused rather than
+downgraded.
 
 ## Troubleshooting
 
@@ -231,12 +258,18 @@ journal format is forward compatible within a major version.
 | --- | --- |
 | `TLS is required` at start | No certificate configured; create one or use `-insecure-http` for local development |
 | `data directory is in use by another process` | A second instance uses the same `-data` directory |
+| `schema version … is newer than this program supports` | The database was used with a newer gr_report; install that version or restore an older backup |
 | `sandbox could not be fully applied` | `strict` on a kernel without Landlock network support (< 6.7); use `auto` |
 | `listen … permission denied` | Port below 1024 without the drop-in, or SELinux port label missing |
 | Lost the only administrator password | See below |
 
-**Lost the only administrator password:** stop the service, open
-`journal.jsonl` as root and replace the `pass_hash` value of the `admin`
-record with the `pass_hash` of an account whose password you know. Start
-the service, log in as `admin` with that password and change it. Keeping a
-second administrator account avoids this.
+**Lost the only administrator password:** stop the service and copy the
+password hash of an account whose password you know onto the `admin`
+account:
+
+```bash
+sudo sqlite3 /var/lib/gr_report/gr_report.db "UPDATE users SET pass_hash = (SELECT pass_hash FROM users WHERE username = 'leader') WHERE username = 'admin'"
+```
+
+Start the service, log in as `admin` with that password and change it.
+Keeping a second administrator account avoids this.

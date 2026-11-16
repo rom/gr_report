@@ -37,7 +37,9 @@ const MaxQueryTerms = 10
 
 // Prepare parses Query. It must be called before Match.
 func (f *ReportFilter) Prepare() {
-	f.terms = strings.Fields(strings.ToLower(f.Query))
+	// CleanLine removes control characters: a NUL byte would end the
+	// pattern early inside SQLite and turn the term into "match all".
+	f.terms = strings.Fields(strings.ToLower(CleanLine(f.Query)))
 	if len(f.terms) > MaxQueryTerms {
 		f.terms = f.terms[:MaxQueryTerms]
 	}
@@ -122,4 +124,10 @@ func ParseDay(s string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+// Terms returns the normalised, lower-cased search terms of Query.
+func (f *ReportFilter) Terms() []string {
+	f.Prepare()
+	return f.terms
 }

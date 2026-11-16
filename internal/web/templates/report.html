@@ -3,30 +3,30 @@
 <h1>{{$r.Subject}}</h1>
 <div class="panel">
   <dl class="meta">
-    <dt>Time</dt><dd>{{ts $r.Timestamp}}</dd>
-    <dt>From</dt><dd>{{$r.SenderName}}</dd>
-    <dt>To</dt><dd>{{$r.ReceiverName}}</dd>
-    <dt>Subject</dt><dd>{{$r.Subject}}</dd>
-    <dt>Template</dt><dd>{{$r.TemplateName}}</dd>
-    {{if .Data.Request}}<dt>Answers request</dt><dd><a href="/requests/{{.Data.Request.ID}}">{{.Data.Request.Subject}}</a></dd>{{end}}
-    <dt>Status</dt><dd><span class="tag {{$r.Status}}">{{$r.Status}}</span>{{if $r.Folder}} in folder <strong>{{$r.Folder}}</strong>{{end}}</dd>
-    {{range $r.Fields}}<dt>{{.Label}}</dt><dd class="body">{{.Value}}</dd>{{end}}
+    <dt>{{$.T "Time"}}</dt><dd>{{ts $r.Timestamp}}</dd>
+    <dt>{{$.T "From"}}</dt><dd>{{$r.SenderName}}</dd>
+    <dt>{{$.T "To"}}</dt><dd>{{if eq $r.ReceiverID "leader"}}{{$.T "Exercise leader"}}{{else}}{{$r.ReceiverName}}{{end}}</dd>
+    <dt>{{$.T "Subject"}}</dt><dd>{{$r.Subject}}</dd>
+    <dt>{{$.T "Template"}}</dt><dd>{{$r.TemplateName}}</dd>
+    {{if .Data.Request}}<dt>{{$.T "Answers request"}}</dt><dd><a href="/requests/{{.Data.Request.ID}}">{{.Data.Request.Subject}}</a></dd>{{end}}
+    <dt>{{$.T "Status"}}</dt><dd><span class="tag {{$r.Status}}">{{$.Tr $r.Status}}</span>{{if $r.Folder}} {{$.T "in folder"}} <strong>{{$r.Folder}}</strong>{{end}}</dd>
+    {{range $r.Fields}}<dt>{{.Label}}</dt><dd class="body">{{if eq .Value "yes"}}{{$.T "yes"}}{{else if eq .Value "no"}}{{$.T "no"}}{{else}}{{.Value}}{{end}}</dd>{{end}}
   </dl>
-  <h2>Content</h2>
+  <h2>{{$.T "Content"}}</h2>
   <div class="body">{{$r.Content}}</div>
 </div>
 {{if .Data.Mine}}
 <form class="panel bulk" method="post" action="/reports/{{$r.ID}}/status">
   <input type="hidden" name="csrf" value="{{.CSRF}}">
-  <label class="inline" for="folder">File in folder</label>
-  <input type="text" id="folder" name="folder" value="{{$r.Folder}}" maxlength="60" list="folders" placeholder="folder name (optional)">
+  <label class="inline" for="folder">{{$.T "File in folder"}}</label>
+  <input type="text" id="folder" name="folder" value="{{$r.Folder}}" maxlength="60" list="folders" placeholder="{{$.T "folder name (optional)"}}">
   <datalist id="folders">{{range .Data.Folders}}<option value="{{.}}">{{end}}</datalist>
-  <button name="action" value="file">File</button>
-  {{if eq $r.Status "filed"}}<button class="plain" name="action" value="read">Back to queue</button>{{end}}
-  <button class="plain" name="action" value="new">Mark as new</button>
+  <button name="action" value="file">{{$.T "File"}}</button>
+  {{if eq $r.Status "filed"}}<button class="plain" name="action" value="read">{{$.T "Back to queue"}}</button>{{end}}
+  <button class="plain" name="action" value="new">{{$.T "Mark as new"}}</button>
 </form>
-<p><a href="/queue?group={{$r.SenderID}}">Queue for {{$r.SenderName}}</a> · <a href="/queue">All queues</a></p>
+<p><a href="/queue?group={{$r.SenderID}}">{{$.T "Queue for %s" $r.SenderName}}</a> · <a href="/queue">{{$.T "All queues"}}</a></p>
 {{else if eq .User.Role "group"}}
-<p><a href="/sent">Sent reports</a></p>
+<p><a href="/sent">{{$.T "Sent reports"}}</a></p>
 {{end}}
 {{end}}

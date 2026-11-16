@@ -39,5 +39,5 @@ report content is fixed by the brief.
   and accounts.
 * Search, sort and the queue can rely on subject, sender and time always
   being present.
-* Some duplication of names in the journal.
+* Some duplication of names in the database.
 * A mistaken report cannot be withdrawn; the leader can file it away.

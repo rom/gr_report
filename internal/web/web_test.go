@@ -31,8 +31,10 @@ func TestLoginLogoutAndHeaders(t *testing.T) {
 	if r.header.Get("Strict-Transport-Security") != "" {
 		t.Error("HSTS sent over plain HTTP")
 	}
-	if strings.Contains(csp, "unsafe") || strings.Contains(csp, "script-src") {
-		t.Error("CSP must not allow scripts")
+	// Scripts and styles only from the server itself, never inline.
+	if strings.Contains(csp, "unsafe") || strings.Contains(csp, "*") || strings.Contains(csp, "data:") ||
+		!strings.Contains(csp, "default-src 'none'") || !strings.Contains(csp, "script-src 'self';") {
+		t.Errorf("CSP too permissive: %s", csp)
 	}
 
 	c.postRaw("/login", url.Values{"username": {"leader"}, "password": {"wrong"}}, nil).
@@ -600,29 +602,51 @@ func TestStaleSessions(t *testing.T) {
 	}
 }
 
-func TestStoreFailure(t *testing.T) {
+func TestWriteFailure(t *testing.T) {
 	e := newEnv(t)
 	alpha, leader, admin := e.login("alpha"), e.login("leader"), e.login("admin")
 	id := alpha.send("s", "c")
-	toks := map[*client]string{alpha: alpha.csrf(), leader: leader.csrf(), admin: admin.csrf()}
-	e.st.Close()
+	e.breakWrites()
 	post := func(c *client, path string, kv ...string) {
 		t.Helper()
-		form := url.Values{"csrf": {toks[c]}}
-		for i := 0; i+1 < len(kv); i += 2 {
-			form.Add(kv[i], kv[i+1])
-		}
-		c.postRaw(path, form, nil).want(t, 500, "could not be saved")
+		c.post(path, kv...).want(t, 500, "could not be saved")
 	}
-	post(alpha, "/reports", "template", e.id["Minimal report"], "subject", "s", "content", "c")
+	post(alpha, "/reports", "template", e.id["Minimal report"], "subject", "s2", "content", "c")
 	post(alpha, "/password", "current", pw("alpha"), "new", "another-password", "confirm", "another-password")
 	post(leader, "/templates", "name", "x")
 	post(leader, "/templates/"+e.id["SITREP"]+"/archive", "archived", "1")
 	post(leader, "/requests", "subject", "s", "template", e.id["SITREP"], "to", "all")
 	post(admin, "/admin/users", "username", "delta", "display_name", "Delta", "role", "group")
 	post(admin, "/admin/users/"+e.id["alpha"], "action", "disable")
-	leader.get("/reports/"+id).want(t, 500)
-	leader.get("/queue").want(t, 200) // reading still works
+	post(admin, "/admin/users/"+e.id["alpha"], "action", "reset")
+	leader.get("/reports/"+id).want(t, 500) // marking it read is a write
+	// Nothing was half-applied and reading still works.
+	leader.get("/queue").want(t, 200, "1–1 of 1")
+	if n := len(e.st.Reports(nil)); n != 1 {
+		t.Errorf("%d reports after failed writes", n)
+	}
+	if rep, _ := e.st.Report(id); rep.Status != model.StatusNew {
+		t.Error("status changed although the write failed")
+	}
+	e.anon().postRaw("/login", url.Values{"username": {"alpha"}, "password": {pw("alpha")}}, nil).want(t, 200)
+}
+
+// A failed database read must give an error page, not a dropped connection
+// or a stack trace.
+func TestReadFailure(t *testing.T) {
+	e := newEnv(t)
+	leader := e.login("leader")
+	e.st.Close()
+	for _, lang := range []string{"en", "sv"} {
+		leader.hdr = map[string]string{"Accept-Language": lang}
+		r := leader.get("/queue").want(t, 500).wantNot(t, "goroutine", "store:", "panic")
+		want := map[string]string{"en": "Something went wrong on the server", "sv": "Något gick fel på servern"}[lang]
+		if !strings.Contains(r.body, want) || r.header.Get("Content-Security-Policy") == "" {
+			t.Errorf("%s: unexpected error page: %s", lang, r.body)
+		}
+	}
+	e.anon().get("/healthz").want(t, 200)
+	e.anon().get("/login").want(t, 200)
 }
 
 func TestClientIPAndOrigin(t *testing.T) {

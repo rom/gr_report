@@ -1,12 +1,14 @@
 // Package web is the HTTP layer of gr_report: routing, authentication and
 // authorisation middleware, server-rendered HTML pages and the handlers.
-// Pages are plain HTML forms without JavaScript, which permits a strict
-// Content-Security-Policy.
+// Pages are plain HTML forms that work without JavaScript; one same-origin
+// script adds conveniences on top. Texts are translated per request and the
+// colour theme is a per-browser preference.
 package web
 
 import (
 	"bytes"
 	"embed"
+	"encoding/json"
 	"html/template"
 	"io/fs"
 	"log/slog"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/rom/gr_report/internal/auth"
+	"github.com/rom/gr_report/internal/i18n"
 	"github.com/rom/gr_report/internal/model"
 	"github.com/rom/gr_report/internal/store"
 )
@@ -30,7 +33,48 @@ var staticFS embed.FS
 // MaxBodyBytes bounds the size of a request body.
 const MaxBodyBytes = 256 << 10
 
-const csp = "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+// Only same-origin resources and no inline script or style: injected markup
+// cannot run code even if an escaping bug slipped through.
+const csp = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+
+// Theme is a colour theme; its name is the value of <html data-theme>.
+type Theme struct {
+	Name  string
+	Label i18n.Label
+}
+
+// Themes lists the selectable themes. "auto" follows the operating system
+// (light, dark, or high contrast when the user asks for more contrast).
+var Themes = []Theme{
+	{"auto", "System default"},
+	{"light", "Light"},
+	{"dark", "Dark"},
+	{"contrast", "High contrast"},
+	{"gold", "Gold"},
+	{"spring", "Spring"},
+	{"autumn", "Autumn"},
+	{"camouflage", "Camouflage"},
+	{"console", "Console green"},
+}
+
+// DefaultTheme is used until the user chooses one.
+const DefaultTheme = "auto"
+
+func validTheme(name string) bool {
+	for _, t := range Themes {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// Preference cookies. They are per browser, not per account, because a
+// group account is shared by several people.
+const (
+	langCookie  = "gr_lang"
+	themeCookie = "gr_theme"
+)
 
 // Server holds the dependencies of the HTTP handlers.
 type Server struct {
@@ -45,6 +89,9 @@ type Server struct {
 	// cookies with the __Host- prefix and HSTS.
 	Secure bool
 	Now    func() time.Time
+	// DefaultLang is used when neither a cookie nor the browser's
+	// Accept-Language header selects a supported language.
+	DefaultLang i18n.Lang
 
 	pages map[string]*template.Template
 }
@@ -57,7 +104,7 @@ func New(st *store.Store, log *slog.Logger, secure bool) *Server {
 	ip.Burst, ip.Forget = 50, 10*time.Minute
 	s := &Server{
 		Store: st, Sessions: auth.NewSessions(), UserLimiter: auth.NewLimiter(), IPLimiter: ip,
-		Log: log, Secure: secure, Now: time.Now,
+		Log: log, Secure: secure, Now: time.Now, DefaultLang: i18n.EN,
 	}
 	s.pages = parsePages()
 	return s
@@ -71,7 +118,7 @@ func fmtTime(t time.Time) string {
 }
 
 func parsePages() map[string]*template.Template {
-	funcs := template.FuncMap{"ts": fmtTime, "join": strings.Join}
+	funcs := template.FuncMap{"ts": fmtTime, "join": strings.Join, "inc": func(i int) int { return i + 1 }}
 	entries, err := fs.Glob(templateFS, "templates/*.html")
 	if err != nil {
 		panic(err)
@@ -87,20 +134,29 @@ func parsePages() map[string]*template.Template {
 	return pages
 }
 
-// reqCtx is the per-request state handed to authenticated handlers.
+// reqCtx is the per-request state handed to handlers.
 type reqCtx struct {
-	w     http.ResponseWriter
-	r     *http.Request
-	user  model.User
-	sess  auth.Session
-	token string
+	w      http.ResponseWriter
+	r      *http.Request
+	user   model.User
+	authed bool // a valid session exists; user and sess are set
+	sess   auth.Session
+	token  string
+	lang   i18n.Lang
+	theme  string
 }
+
+// t translates a message into the language of the request.
+func (c *reqCtx) t(key string, args ...any) string { return i18n.T(c.lang, key, args...) }
 
 type handler func(c *reqCtx)
 
 // page is the data every HTML page receives.
 type page struct {
 	Title    string
+	Lang     i18n.Lang
+	Theme    string
+	Path     string
 	User     *model.User
 	CSRF     string
 	Flash    string
@@ -108,6 +164,54 @@ type page struct {
 	NewCount int
 	Refresh  int
 	Data     any
+}
+
+// T translates a message into the language of the page.
+func (p *page) T(key string, args ...any) string { return i18n.T(p.Lang, key, args...) }
+
+// Nav reports whether the page belongs to the navigation entry at prefix.
+func (p *page) Nav(prefix string) bool {
+	return p.Path == prefix || strings.HasPrefix(p.Path, prefix+"/")
+}
+
+// Tr translates a value that is stored in English: a role, a report
+// status, a field type or a label.
+func (p *page) Tr(v any) string {
+	switch x := v.(type) {
+	case model.Role:
+		return p.T(string(x))
+	case model.Status:
+		return p.T(string(x))
+	case model.FieldType:
+		return p.T(string(x))
+	case i18n.Label:
+		return p.T(string(x))
+	case string:
+		return p.T(x)
+	}
+	return ""
+}
+
+// prefs returns the language and theme for a request: the preference
+// cookie wins, then the browser's language, then the server default.
+func (s *Server) prefs(r *http.Request) (i18n.Lang, string) {
+	lang := i18n.Match(r.Header.Get("Accept-Language"), s.DefaultLang)
+	if ck, err := r.Cookie(langCookie); err == nil {
+		if l, ok := i18n.Parse(ck.Value); ok {
+			lang = l
+		}
+	}
+	theme := DefaultTheme
+	if ck, err := r.Cookie(themeCookie); err == nil && validTheme(ck.Value) {
+		theme = ck.Value
+	}
+	return lang, theme
+}
+
+func (s *Server) newCtx(w http.ResponseWriter, r *http.Request) *reqCtx {
+	c := &reqCtx{w: w, r: r}
+	c.lang, c.theme = s.prefs(r)
+	return c
 }
 
 func (s *Server) cookieName() string {
@@ -160,64 +264,103 @@ func (s *Server) headers(next http.Handler) http.Handler {
 			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
+		// A failed database read surfaces as a panic (see package store):
+		// answer with an error page instead of dropping the connection.
+		defer func() {
+			v := recover()
+			if v == nil {
+				return
+			}
+			if v == http.ErrAbortHandler {
+				panic(v)
+			}
+			s.Log.Error("panic", "err", v, "path", r.URL.Path)
+			c := s.newCtx(w, r)
+			s.fail(c, http.StatusInternalServerError,
+				c.t("Something went wrong on the server. Try again; if it keeps happening, tell the administrator."))
+		}()
 		next.ServeHTTP(w, r)
 	})
 }
 
 // parsePost parses the form of a state changing request and applies the
 // origin check. It reports whether the handler may continue.
-func (s *Server) parsePost(w http.ResponseWriter, r *http.Request) bool {
-	if r.Method != http.MethodPost {
+func (s *Server) parsePost(c *reqCtx) bool {
+	if c.r.Method != http.MethodPost {
 		return true
 	}
-	if !sameOrigin(r) {
-		s.plainError(w, r, http.StatusForbidden, "Cross-site request rejected.")
+	if !sameOrigin(c.r) {
+		s.fail(c, http.StatusForbidden, c.t("Cross-site request rejected."))
 		return false
 	}
-	if err := r.ParseForm(); err != nil {
-		s.plainError(w, r, http.StatusBadRequest, "The request could not be read or is too large.")
+	if err := c.r.ParseForm(); err != nil {
+		s.fail(c, http.StatusBadRequest, c.t("The request could not be read or is too large."))
 		return false
 	}
 	return true
 }
 
+// session loads the session and user of the request, if any. A session of
+// a deleted or disabled account is ended.
+func (s *Server) session(c *reqCtx) bool {
+	if ck, err := c.r.Cookie(s.cookieName()); err == nil {
+		c.token = ck.Value
+	}
+	sess, ok := s.Sessions.Get(c.token)
+	if !ok {
+		return false
+	}
+	user, ok := s.Store.User(sess.UserID)
+	if !ok || user.Disabled {
+		s.Sessions.Delete(c.token)
+		return false
+	}
+	c.sess, c.user, c.authed = sess, user, true
+	return true
+}
+
+func (s *Server) checkCSRF(c *reqCtx) bool {
+	if c.r.Method == http.MethodPost && !auth.EqualToken(c.sess.CSRF, c.r.PostForm.Get("csrf")) {
+		s.fail(c, http.StatusForbidden, c.t("The form has expired. Go back, reload the page and try again."))
+		return false
+	}
+	return true
+}
+
+// open wraps a handler that works with or without a session.
+func (s *Server) open(h handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		c := s.newCtx(w, r)
+		s.session(c)
+		if !s.parsePost(c) || (c.authed && !s.checkCSRF(c)) {
+			return
+		}
+		h(c)
+	}
+}
+
 // authed wraps a handler with session, CSRF and role checks.
 func (s *Server) authed(h handler, roles ...model.Role) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c := &reqCtx{w: w, r: r}
-		if ck, err := r.Cookie(s.cookieName()); err == nil {
-			c.token = ck.Value
-		}
-		sess, ok := s.Sessions.Get(c.token)
-		if !ok {
+		c := s.newCtx(w, r)
+		if !s.session(c) {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
-		user, ok := s.Store.User(sess.UserID)
-		if !ok || user.Disabled {
-			s.Sessions.Delete(c.token)
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+		if !s.parsePost(c) || !s.checkCSRF(c) {
 			return
 		}
-		c.sess, c.user = sess, user
-		if !s.parsePost(w, r) {
-			return
-		}
-		if r.Method == http.MethodPost && !auth.EqualToken(sess.CSRF, r.PostForm.Get("csrf")) {
-			s.fail(c, http.StatusForbidden, "The form has expired. Go back, reload the page and try again.")
-			return
-		}
-		if user.MustChange && r.URL.Path != "/password" && r.URL.Path != "/logout" {
+		if c.user.MustChange && r.URL.Path != "/password" && r.URL.Path != "/logout" {
 			http.Redirect(w, r, "/password", http.StatusSeeOther)
 			return
 		}
 		if len(roles) > 0 {
 			allowed := false
 			for _, role := range roles {
-				allowed = allowed || role == user.Role
+				allowed = allowed || role == c.user.Role
 			}
 			if !allowed {
-				s.fail(c, http.StatusForbidden, "You do not have access to this page.")
+				s.fail(c, http.StatusForbidden, c.t("You do not have access to this page."))
 				return
 			}
 		}
@@ -245,19 +388,22 @@ func (s *Server) write(w http.ResponseWriter, status int, name string, p *page) 
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Language", string(p.Lang))
 	w.WriteHeader(status)
 	_, _ = w.Write(buf.Bytes())
 }
 
-// render writes a page for a logged-in user.
+// render writes a page. It works for anonymous requests too.
 func (s *Server) render(c *reqCtx, status int, name, title string, data any, errMsg string) {
-	p := &page{Title: title, User: &c.user, CSRF: c.sess.CSRF, Error: errMsg, Data: data}
-	if status == http.StatusOK {
-		p.Flash = s.Sessions.TakeFlash(c.token)
-	}
-	if q := queueID(&c.user); q != "" {
-		for _, n := range s.Store.Stats(q).New {
-			p.NewCount += n
+	p := &page{Title: title, Lang: c.lang, Theme: c.theme, Path: c.r.URL.Path, Error: errMsg, Data: data}
+	if c.authed {
+		p.User, p.CSRF = &c.user, c.sess.CSRF
+		if status == http.StatusOK {
+			p.Flash = s.Sessions.TakeFlash(c.token)
+		}
+		// Not on a server error page: the database may be what failed.
+		if q := queueID(&c.user); q != "" && status < http.StatusInternalServerError {
+			p.NewCount = s.Store.NewCount(q)
 		}
 	}
 	if v, ok := data.(*queueView); ok && v.P.Auto {
@@ -267,12 +413,7 @@ func (s *Server) render(c *reqCtx, status int, name, title string, data any, err
 }
 
 func (s *Server) fail(c *reqCtx, status int, msg string) {
-	s.render(c, status, "error", http.StatusText(status), nil, msg)
-}
-
-// plainError renders an error page without a session.
-func (s *Server) plainError(w http.ResponseWriter, _ *http.Request, status int, msg string) {
-	s.write(w, status, "error", &page{Title: http.StatusText(status), Error: msg})
+	s.render(c, status, "error", c.t(http.StatusText(status)), nil, msg)
 }
 
 // storeErr handles a failed write: the user gets a 500 and the cause is
@@ -282,7 +423,7 @@ func (s *Server) storeErr(c *reqCtx, err error) bool {
 		return false
 	}
 	s.Log.Error("store", "err", err, "path", c.r.URL.Path)
-	s.fail(c, http.StatusInternalServerError, "The change could not be saved.")
+	s.fail(c, http.StatusInternalServerError, c.t("The change could not be saved."))
 	return true
 }
 
@@ -319,8 +460,10 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 
-	mux.HandleFunc("GET /login", s.loginForm)
-	mux.HandleFunc("POST /login", s.login)
+	mux.HandleFunc("GET /login", s.open(s.loginForm))
+	mux.HandleFunc("POST /login", s.open(s.login))
+	mux.HandleFunc("GET /settings", s.open(s.settingsForm))
+	mux.HandleFunc("POST /settings", s.open(s.settingsSave))
 	mux.HandleFunc("POST /logout", s.authed(s.logout))
 	mux.HandleFunc("GET /password", s.authed(s.passwordForm))
 	mux.HandleFunc("POST /password", s.authed(s.passwordChange))
@@ -335,6 +478,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /queue", s.authed(s.queue, group, leader))
 	mux.HandleFunc("POST /queue/bulk", s.authed(s.queueBulk, group, leader))
 	mux.HandleFunc("GET /sent", s.authed(s.sent, group))
+	mux.HandleFunc("GET /api/new-count", s.authed(s.newCount, group, leader))
 
 	mux.HandleFunc("GET /requests", s.authed(s.requests, group, leader))
 	mux.HandleFunc("GET /requests/new", s.authed(s.requestForm, leader))
@@ -365,4 +509,41 @@ func (s *Server) root(c *reqCtx) {
 	default:
 		http.Redirect(c.w, c.r, "/home", http.StatusSeeOther)
 	}
+}
+
+// newCount serves the number of new reports in the user's queue to the
+// page script, which shows a notice when reports arrive.
+func (s *Server) newCount(c *reqCtx) {
+	c.w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(c.w).Encode(map[string]int{"new": s.Store.NewCount(queueID(&c.user))})
+}
+
+// ---- language and theme ----
+
+type settingsView struct {
+	Languages []i18n.Lang
+	Themes    []Theme
+}
+
+func (s *Server) settingsForm(c *reqCtx) {
+	s.render(c, http.StatusOK, "settings", c.t("Settings"), &settingsView{Languages: i18n.Languages, Themes: Themes}, "")
+}
+
+func (s *Server) settingsSave(c *reqCtx) {
+	f := c.r.PostForm
+	set := func(name, value string) {
+		http.SetCookie(c.w, &http.Cookie{Name: name, Value: value, Path: "/", MaxAge: 365 * 24 * 3600,
+			HttpOnly: true, Secure: s.Secure, SameSite: http.SameSiteLaxMode})
+	}
+	if l, ok := i18n.Parse(f.Get("lang")); ok {
+		set(langCookie, string(l))
+		c.lang = l
+	}
+	if th := f.Get("theme"); validTheme(th) {
+		set(themeCookie, th)
+	}
+	if c.authed {
+		s.Sessions.SetFlash(c.token, c.t("Settings saved."))
+	}
+	http.Redirect(c.w, c.r, "/settings", http.StatusSeeOther)
 }

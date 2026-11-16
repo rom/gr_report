@@ -9,6 +9,8 @@ linters:
         - (net.Conn).Close
         - (*github.com/rom/gr_report/internal/store.Store).Close
         - syscall.Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.DB).Close
         - os.Remove
         - fmt.Fprintln
   exclusions:

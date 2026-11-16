@@ -1,12 +1,14 @@
 package web
 
 import (
+	"database/sql"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -24,6 +26,7 @@ type env struct {
 	srv *Server
 	ts  *httptest.Server
 	st  *store.Store
+	dir string
 	id  map[string]string // username or template name -> ID
 }
 
@@ -31,12 +34,13 @@ func pw(name string) string { return "password-" + name }
 
 func newEnv(t testing.TB) *env {
 	t.Helper()
-	st, err := store.Open(t.TempDir())
+	dir := t.TempDir()
+	st, err := store.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	e := &env{t: t, st: st, id: map[string]string{}}
+	e := &env{t: t, st: st, dir: dir, id: map[string]string{}}
 	for _, u := range []struct {
 		name, display string
 		role          model.Role
@@ -80,6 +84,7 @@ func newEnv(t testing.TB) *env {
 type client struct {
 	e    *env
 	http *http.Client
+	hdr  map[string]string // sent with every request
 }
 
 type result struct {
@@ -107,6 +112,11 @@ func (e *env) login(name string) *client {
 
 func (c *client) do(req *http.Request) result {
 	c.e.t.Helper()
+	for k, v := range c.hdr {
+		if req.Header.Get(k) == "" {
+			req.Header.Set(k, v)
+		}
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		c.e.t.Fatal(err)
@@ -186,4 +196,21 @@ func (c *client) send(subject, content string, extra ...string) string {
 		c.e.t.Fatalf("send report: status %d at %s", r.status, r.path)
 	}
 	return strings.TrimPrefix(r.path, "/reports/")
+}
+
+// breakWrites makes every INSERT fail while reads keep working, to simulate
+// a full disk. It uses a second connection to the same database file.
+func (e *env) breakWrites() {
+	e.t.Helper()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(e.dir, store.DBName))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer db.Close()
+	for _, table := range []string{"users", "templates", "requests", "reports"} {
+		q := "CREATE TRIGGER fail_" + table + " BEFORE INSERT ON " + table + " BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END"
+		if _, err := db.Exec(q); err != nil {
+			e.t.Fatal(err)
+		}
+	}
 }

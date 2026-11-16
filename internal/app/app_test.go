@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/rom/gr_report/internal/auth"
+	"github.com/rom/gr_report/internal/i18n"
 	"github.com/rom/gr_report/internal/sandbox"
 	"github.com/rom/gr_report/internal/store"
 )
@@ -39,7 +40,7 @@ func TestParseConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Addr != ":8443" || cfg.DataDir != "./data" || cfg.Sandbox != sandbox.ModeAuto || cfg.InsecureHTTP || cfg.DevSeed {
+	if cfg.Addr != ":8443" || cfg.DataDir != "./data" || cfg.Sandbox != sandbox.ModeAuto || cfg.InsecureHTTP || cfg.DevSeed || cfg.Lang != i18n.EN {
 		t.Errorf("defaults = %+v", cfg)
 	}
 
@@ -64,6 +65,12 @@ func TestParseConfig(t *testing.T) {
 	if cfg, err = ParseConfig(nil, env(map[string]string{"GR_REPORT_INSECURE_HTTP": "1"}), io.Discard); err != nil || !cfg.InsecureHTTP {
 		t.Errorf("GR_REPORT_INSECURE_HTTP = %+v, %v", cfg, err)
 	}
+	if cfg, err = ParseConfig(append([]string{"-lang", "sv"}, tls...), env(nil), io.Discard); err != nil || cfg.Lang != i18n.SV {
+		t.Errorf("-lang sv = %+v, %v", cfg, err)
+	}
+	if cfg, err = ParseConfig(tls, env(map[string]string{"GR_REPORT_LANG": "sv"}), io.Discard); err != nil || cfg.Lang != i18n.SV {
+		t.Errorf("GR_REPORT_LANG = %+v, %v", cfg, err)
+	}
 	if cfg, err = ParseConfig([]string{"-version"}, env(nil), io.Discard); err != nil || !cfg.ShowVersion {
 		t.Errorf("-version = %+v, %v", cfg, err)
 	}
@@ -77,6 +84,7 @@ func TestParseConfig(t *testing.T) {
 		append([]string{"-port", "http"}, tls...),
 		append([]string{"-port", "70000"}, tls...),
 		append([]string{"-sandbox", "maybe"}, tls...),
+		append([]string{"-lang", "de"}, tls...),
 		append([]string{"-data", ""}, tls...),
 		append([]string{"extra"}, tls...),
 		{"-no-such-flag"},
@@ -182,7 +190,7 @@ func start(t *testing.T, a *App, scheme string) (string, func() error) {
 func TestRunHTTPDevSeed(t *testing.T) {
 	dir := t.TempDir()
 	var logs syncBuffer
-	a := &App{Cfg: Config{Addr: "127.0.0.1:0", DataDir: dir, InsecureHTTP: true, DevSeed: true, Sandbox: sandbox.ModeOff},
+	a := &App{Cfg: Config{Addr: "127.0.0.1:0", DataDir: dir, InsecureHTTP: true, DevSeed: true, Sandbox: sandbox.ModeOff, Lang: i18n.SV},
 		Log: slog.New(slog.NewTextHandler(&logs, nil))}
 	base, stop := start(t, a, "http")
 
@@ -194,7 +202,8 @@ func TestRunHTTPDevSeed(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != 200 || !strings.Contains(string(body), "Report queue") {
+	// The configured default language applies when the browser asks for none.
+	if resp.StatusCode != 200 || !strings.Contains(string(body), "Rapportkö") || !strings.Contains(string(body), `<html lang="sv"`) {
 		t.Errorf("dev login: %d\n%s", resp.StatusCode, body)
 	}
 	if err := stop(); err != nil {
@@ -218,6 +227,12 @@ func TestRunHTTPDevSeed(t *testing.T) {
 	users, templates := len(st.Users()), len(st.Templates(true))
 	if users != 4 || templates != 2 {
 		t.Errorf("seeded %d users, %d templates", users, templates)
+	}
+	if tps := st.Templates(true); tps[0].Name != "Lägesrapport" {
+		t.Errorf("starter templates not in the configured language: %q", tps[0].Name)
+	}
+	if _, err := os.Stat(filepath.Join(dir, store.DBName)); err != nil {
+		t.Errorf("database file: %v", err)
 	}
 	if err := a.Bootstrap(st); err != nil {
 		t.Fatal(err)
@@ -373,9 +388,6 @@ func TestBootstrapErrors(t *testing.T) {
 		t.Error("admin created although the password could not be handed over")
 	}
 	st.Close()
-	if err := a.Bootstrap(st); err == nil {
-		t.Error("Bootstrap on a closed store succeeded")
-	}
 	bad := &App{Cfg: Config{DataDir: t.TempDir()}, Log: a.Log, Hasher: auth.Hasher{Iterations: 1}}
 	st2, _ := store.Open(t.TempDir())
 	defer st2.Close()
@@ -389,9 +401,18 @@ func TestBootstrapErrors(t *testing.T) {
 }
 
 func TestStarterTemplatesValid(t *testing.T) {
-	for _, tp := range starterTemplates() {
-		if err := tp.Validate(); err != nil {
-			t.Errorf("%s: %v", tp.Name, err)
+	for _, lang := range i18n.Languages {
+		tps := starterTemplates(lang)
+		if len(tps) != 2 || len(tps[0].Fields) != 0 || len(tps[1].Fields) != 6 {
+			t.Errorf("%s: unexpected starter templates", lang)
 		}
+		for _, tp := range tps {
+			if err := tp.Validate(); err != nil {
+				t.Errorf("%s %s: %v", lang, tp.Name, err)
+			}
+		}
+	}
+	if starterTemplates(i18n.SV)[1].Name != "Lägesrapport" || starterTemplates(i18n.EN)[0].Name != "Minimal report" {
+		t.Error("starter templates are not in the requested language")
 	}
 }

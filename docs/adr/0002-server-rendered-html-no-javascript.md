@@ -1,6 +1,6 @@
 # 0002 – Server-rendered HTML without JavaScript
 
-* Status: Accepted
+* Status: Superseded by [0011](0011-progressive-enhancement.md)
 * Date: 2026-11-16
 * ASRs: C-2, Q-1, Q-3, Q-10
 

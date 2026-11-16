@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/rom/gr_report/internal/i18n"
 )
 
 // Password policy.
@@ -41,14 +43,14 @@ type Hasher struct {
 // CheckPolicy validates a new password against the password policy.
 func CheckPolicy(pw string) error {
 	if !utf8.ValidString(pw) {
-		return errors.New("password must be valid text")
+		return i18n.Errorf("password must be valid text")
 	}
 	n := utf8.RuneCountInString(pw)
 	if n < MinPasswordLen {
-		return fmt.Errorf("password must be at least %d characters", MinPasswordLen)
+		return i18n.Errorf("password must be at least %d characters", MinPasswordLen)
 	}
 	if len(pw) > MaxPasswordLen {
-		return fmt.Errorf("password must be at most %d bytes", MaxPasswordLen)
+		return i18n.Errorf("password must be at most %d bytes", MaxPasswordLen)
 	}
 	return nil
 }
