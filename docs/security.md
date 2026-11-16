@@ -15,7 +15,7 @@
 | Threat | Counter-measures |
 | --- | --- |
 | Eavesdropping or tampering on the exercise network | TLS mandatory by default, TLS ≥ 1.2, HSTS, `Secure` cookies |
-| Password guessing | PBKDF2-HMAC-SHA256 with 600 000 iterations, login throttling per account+address and per address, generated one-time passwords, uniform timing for unknown users |
+| Password guessing | Argon2id (19 MiB, 2 passes; [ADR 0015](adr/0015-argon2id.md)) with at most 4 concurrent derivations, older PBKDF2 hashes upgraded at login, login throttling per account+address and per address, generated one-time passwords, uniform timing for unknown users |
 | Session theft / fixation | 256-bit random token, only its SHA-256 is kept in memory, `HttpOnly`, `SameSite=Strict`, `__Host-` prefix, new token at login, idle and absolute time-outs, all sessions revoked on password change/reset/disable |
 | Cross-site request forgery | Per-session token in every form, `Sec-Fetch-Site`/`Origin` check on every POST, `SameSite=Strict` |
 | Cross-site scripting, content injection | Contextual escaping by `html/template`; CSP `default-src 'none'` with only same-origin script, styles and images – no inline script, style or event handler, no `eval`; the one script never inserts HTML; `nosniff`; theme and language preferences are validated against fixed lists before they reach a page |
@@ -26,7 +26,7 @@
 | Resource exhaustion | Request body limit 256 KiB, header limit 32 KiB, read/write/idle time-outs, field length limits, bounded session and throttle tables, `MemoryMax`/`TasksMax` in the unit |
 | Corrupt stored data | SQLite integrity check at start; `STRICT` tables; a file that is not a database is refused, never overwritten; a damaged row fails loudly instead of being shown half-read |
 | Remote code execution in the server | Memory-safe language, no cgo and no C library in the process, and the sandbox layers below |
-| Supply-chain compromise | One runtime dependency (the pure-Go SQLite driver) with pinned, checksummed versions ([ADR 0010](adr/0010-vetted-dependencies.md)); the web interface has no third-party script, style or font |
+| Supply-chain compromise | Two runtime dependencies (the pure-Go SQLite driver and `golang.org/x/crypto`) with pinned, checksummed versions ([ADR 0010](adr/0010-vetted-dependencies.md)); the web interface has no third-party script, style or font |
 
 Out of scope: a malicious administrator or root user on the server, denial
 of service by flooding the network, and compromised participant devices.

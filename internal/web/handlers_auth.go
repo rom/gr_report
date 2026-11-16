@@ -48,6 +48,21 @@ func (s *Server) login(c *reqCtx) {
 		return
 	}
 	s.UserLimiter.Reset(userKey)
+	// Upgrade hashes made with the previous scheme or weaker parameters
+	// while the password is at hand. Failing to store the new hash must
+	// not stop the login.
+	if s.Hasher.NeedsRehash(user.PassHash) {
+		if hash, err := s.Hasher.Hash(password); err != nil {
+			s.Log.Error("rehash", "user", user.Username, "err", err)
+		} else {
+			user.PassHash = hash
+			if err := s.Store.PutUser(user); err != nil {
+				s.Log.Error("rehash", "user", user.Username, "err", err)
+			} else {
+				s.Log.Info("audit", "event", "password_rehashed", "user", user.Username)
+			}
+		}
+	}
 	s.setCookie(w, s.Sessions.Create(user.ID), 0)
 	s.Log.Info("audit", "event", "login", "user", user.Username, "role", string(user.Role), "ip", ip)
 	http.Redirect(w, r, "/", http.StatusSeeOther)

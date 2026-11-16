@@ -19,7 +19,8 @@ import (
 	"github.com/rom/gr_report/internal/store"
 )
 
-var fastHasher = auth.Hasher{Iterations: 1000}
+// fastHasher keeps the tests quick: 64 KiB and one pass instead of 19 MiB.
+var fastHasher = auth.Hasher{MemoryKiB: 64, Time: 1}
 
 type env struct {
 	t   testing.TB

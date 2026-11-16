@@ -10,7 +10,7 @@ changed decision gets a new record that supersedes the old one.
 | [0002](0002-server-rendered-html-no-javascript.md) | Server-rendered HTML without JavaScript | Superseded by 0011 |
 | [0003](0003-journal-storage.md) | In-memory state with an append-only JSON journal | Superseded by 0012 |
 | [0004](0004-roles-and-group-accounts.md) | Three roles, one shared account per group, one shared leader queue | Accepted |
-| [0005](0005-authentication-and-sessions.md) | Passwords with PBKDF2, server-side in-memory sessions | Accepted |
+| [0005](0005-authentication-and-sessions.md) | Passwords with PBKDF2, server-side in-memory sessions | Accepted; hashing superseded by 0015 |
 | [0006](0006-layered-sandbox.md) | Layered sandbox: self-confinement after start-up plus OS policy | Accepted |
 | [0007](0007-tls-by-default.md) | TLS required by default, terminated in the process | Accepted |
 | [0008](0008-immutable-reports.md) | Reports are immutable and self-contained | Accepted |
@@ -20,6 +20,7 @@ changed decision gets a new record that supersedes the old one.
 | [0012](0012-sqlite-storage.md) | SQLite through a pure-Go driver | Accepted |
 | [0013](0013-internationalisation.md) | English and Swedish from one message catalogue; language per browser | Accepted |
 | [0014](0014-accessibility-and-themes.md) | WCAG 2.1 AA as the bar; themes as checked colour sets | Accepted |
+| [0015](0015-argon2id.md) | Argon2id for password hashing, PBKDF2 hashes upgraded at login | Accepted |
 
 Template for new records:
 

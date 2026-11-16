@@ -247,6 +247,9 @@ journalctl -u gr_report | grep msg=audit
 git pull && sudo make install && sudo systemctl restart gr_report
 ```
 
+Password hashes made by an earlier version (PBKDF2) keep working and are
+converted to Argon2id the next time each user logs in.
+
 Sessions are kept in memory, so users log in again after a restart. The
 database schema is upgraded automatically at start; take a backup first. A
 database that was written by a newer version is refused rather than

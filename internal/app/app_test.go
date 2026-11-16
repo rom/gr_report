@@ -157,7 +157,7 @@ func start(t *testing.T, a *App, scheme string) (string, func() error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ready := make(chan net.Addr, 1)
 	a.Ready = func(addr net.Addr) { ready <- addr }
-	a.Hasher = auth.Hasher{Iterations: 1000}
+	a.Hasher = auth.Hasher{MemoryKiB: 64, Time: 1}
 	errc := make(chan error, 1)
 	go func() { errc <- a.Run(ctx) }()
 	stopped := false
@@ -342,7 +342,7 @@ func TestRunErrors(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	run := func(cfg Config) error {
 		cfg.Sandbox = sandbox.ModeOff
-		a := &App{Cfg: cfg, Log: log, Hasher: auth.Hasher{Iterations: 1000}}
+		a := &App{Cfg: cfg, Log: log, Hasher: auth.Hasher{MemoryKiB: 64, Time: 1}}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return a.Run(ctx)
@@ -380,7 +380,7 @@ func TestBootstrapErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &App{Cfg: Config{DataDir: "/nonexistent-dir-for-test"}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Hasher: auth.Hasher{Iterations: 1000}}
+	a := &App{Cfg: Config{DataDir: "/nonexistent-dir-for-test"}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Hasher: auth.Hasher{MemoryKiB: 64, Time: 1}}
 	if err := a.Bootstrap(st); err == nil {
 		t.Error("unwritable password file ignored")
 	}
@@ -388,7 +388,7 @@ func TestBootstrapErrors(t *testing.T) {
 		t.Error("admin created although the password could not be handed over")
 	}
 	st.Close()
-	bad := &App{Cfg: Config{DataDir: t.TempDir()}, Log: a.Log, Hasher: auth.Hasher{Iterations: 1}}
+	bad := &App{Cfg: Config{DataDir: t.TempDir()}, Log: a.Log, Hasher: auth.Hasher{Time: 999}}
 	st2, _ := store.Open(t.TempDir())
 	defer st2.Close()
 	if err := bad.Bootstrap(st2); err == nil {

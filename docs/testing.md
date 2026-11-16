@@ -26,7 +26,7 @@ per-package and total statement coverage and **fails below 85 %**
 | `internal/model` | Unit, table-driven | Validation of users, templates, requests, reports per field type; key derivation; filter, search, sort; deep copies |
 | `internal/store` | Unit with real database files | CRUD, ordering, persistence across reopen, directory lock, schema version and migration rollback, refusal of non-database files, search including Swedish letters and `LIKE` wildcards, loud failure on closed or damaged data |
 | `internal/i18n` | Unit + source scan | Translation, fallback, nested messages, `Accept-Language` matching; **every message used in the code has a Swedish translation, none is unused, format verbs match** |
-| `internal/auth` | Unit with fake clock | Hash format and verification, policy, session idle/absolute expiry, eviction, flash, throttling back-off and bounds |
+| `internal/auth` | Unit with fake clock | Argon2id hash format, the reference test vector, parameter bounds, PBKDF2 compatibility and rehash decision, concurrency limit, policy, session idle/absolute expiry, eviction, flash, throttling back-off and bounds |
 | `internal/web` | Integration over HTTP (`httptest`) with a real store | Login/logout, cookie attributes, security headers, throttling, CSRF and origin checks, role matrix for every route, object-level access, the full report / queue / request / template / account flows (also in Swedish), language and theme selection, escaping of hostile input, body limit, stale sessions, write failure, read failure; **accessibility audit of every page**; **contrast ratios of every theme** |
 | `internal/app` | Integration | Flag and environment parsing, first-run bootstrap, HTTP and TLS serving, TLS minimum version, certificate reload (good and broken), start-up errors, graceful shutdown |
 | `internal/sandbox` | Unit + child process | BPF program against an interpreter; **enforcement**: a child applies the sandbox and tries exec, sockets, connect, ptrace, setuid, forbidden reads and writes; strict mode; in-process apply |
@@ -45,7 +45,7 @@ every new route belongs in it.
 | `model.FuzzClean` | arbitrary bytes | output is valid UTF-8 without control characters; cleaning is idempotent |
 | `store.FuzzReportRoundTrip` | report text, search query | stored text comes back byte for byte; the SQL search agrees with the reference matcher; no input is interpreted as SQL |
 | `i18n.FuzzMatch` | `Accept-Language` header | no panic; always a supported language |
-| `auth.FuzzVerify` | stored hash, password | malformed hashes never verify |
+| `auth.FuzzVerify` | stored hash (Argon2id or PBKDF2), password | malformed hashes never verify; cost parameters beyond the bounds are never accepted |
 | `web.FuzzQueueParams` | query string | parameters are normalised and round-trip; generated links are safe |
 | `web.FuzzHandlers` | path, query, form body as leader and group | never a 5xx; never unescaped markup |
 | `sandbox.FuzzFilter` | deny list, system call, ABI | generated BPF equals the reference policy |

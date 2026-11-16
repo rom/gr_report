@@ -31,6 +31,7 @@ Third-party modules are allowed when they earn their place. Rules:
 | Module | Used by | Why |
 | --- | --- | --- |
 | `modernc.org/sqlite` | `internal/store` | SQLite without cgo (a mechanical translation of the C sources to Go) |
+| `golang.org/x/crypto/argon2` | `internal/auth` | Argon2id password hashing ([ADR 0015](0015-argon2id.md)) |
 | `golang.org/x/net/html` | tests only | HTML parser for the accessibility audit |
 
 Everything else in `go.mod` is an indirect dependency of the SQLite driver.
@@ -43,15 +44,15 @@ Everything else in `go.mod` is an indirect dependency of the SQLite driver.
 * **Keep zero dependencies and hand-write a storage engine.** That was
   ADR 0003; SQLite was asked for and is the better tool.
 * **Take more from `golang.org/x`** (`x/sys` for system call numbers,
-  `x/crypto` for Argon2id, `x/text` for i18n). Each is reasonable and now
-  permitted, but none was needed to meet the current requirements; the
-  hand-maintained system call table and PBKDF2 remain. Argon2id is noted as
-  a follow-up in [ADR 0005](0005-authentication-and-sessions.md).
+  `x/text` for i18n). Each is reasonable and now permitted, but neither was
+  needed to meet the current requirements; the hand-maintained system call
+  table and the in-house message catalogue remain. `x/crypto` was added
+  later for Argon2id.
 
 ## Consequences
 
-* The supply chain grows from zero to one runtime dependency with about ten
-  transitive modules; the binary grows from about 8 MB to about 19 MB.
+* The supply chain grows from zero to two runtime dependencies (SQLite
+  driver, `x/crypto`) with about ten transitive modules; the binary grows from about 8 MB to about 19 MB.
 * Dependency updates become a maintenance task (`go list -m -u all`,
   `govulncheck`).
 * The SQLite engine is machine-translated C running as Go: no memory

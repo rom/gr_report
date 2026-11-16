@@ -1,6 +1,9 @@
 package web
 
 import (
+	"crypto/pbkdf2"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -57,6 +60,63 @@ func TestLoginLogoutAndHeaders(t *testing.T) {
 	c.post("/logout").want(t, 200, `action="/login"`)
 	if got := c.get("/queue").path; got != "/login" {
 		t.Errorf("after logout /queue ended at %s", got)
+	}
+}
+
+// Accounts created before the switch to Argon2id keep working and are
+// upgraded transparently at the next login.
+func TestLegacyHashUpgradedAtLogin(t *testing.T) {
+	e := newEnv(t)
+	salt := []byte("0123456789abcdef")
+	key, err := pbkdf2.Key(sha256.New, "old-style-password", salt, 1000, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc := base64.RawStdEncoding
+	legacy := "pbkdf2-sha256$1000$" + enc.EncodeToString(salt) + "$" + enc.EncodeToString(key)
+	u, _ := e.st.User(e.id["alpha"])
+	u.PassHash = legacy
+	if err := e.st.PutUser(u); err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"username": {"alpha"}, "password": {"old-style-password"}}
+
+	// A wrong password changes nothing.
+	e.anon().postRaw("/login", url.Values{"username": {"alpha"}, "password": {"wrong"}}, nil).want(t, 401)
+	if u, _ := e.st.User(e.id["alpha"]); u.PassHash != legacy {
+		t.Fatal("hash changed by a failed login")
+	}
+
+	e.anon().postRaw("/login", form, nil).want(t, 200, "Group Alpha")
+	u, _ = e.st.User(e.id["alpha"])
+	if !strings.HasPrefix(u.PassHash, "$argon2id$v=19$m=64,t=1,p=1$") {
+		t.Fatalf("hash not upgraded: %q", u.PassHash)
+	}
+	if u.MustChange || u.Disabled || u.DisplayName != "Group Alpha" {
+		t.Errorf("upgrade changed other fields: %+v", u)
+	}
+	// The password still works and the hash is now stable.
+	upgraded := u.PassHash
+	e.anon().postRaw("/login", form, nil).want(t, 200, "Group Alpha")
+	if u, _ := e.st.User(e.id["alpha"]); u.PassHash != upgraded {
+		t.Error("an up-to-date hash was replaced again")
+	}
+
+	// Raising the cost later upgrades existing Argon2id hashes too.
+	e.srv.Hasher.Time = 2
+	e.anon().postRaw("/login", form, nil).want(t, 200)
+	if u, _ := e.st.User(e.id["alpha"]); !strings.Contains(u.PassHash, "t=2,") {
+		t.Errorf("hash not upgraded to the new cost: %q", u.PassHash)
+	}
+
+	// If the new hash cannot be stored or computed, the login still works.
+	e.srv.Hasher.Time = 3
+	e.breakWrites()
+	e.anon().postRaw("/login", form, nil).want(t, 200, "Group Alpha")
+	e.srv.Hasher.Time = 999
+	e.anon().postRaw("/login", form, nil).want(t, 200, "Group Alpha")
+	if u, _ := e.st.User(e.id["alpha"]); !strings.Contains(u.PassHash, "t=2,") {
+		t.Errorf("hash changed although the write failed: %q", u.PassHash)
 	}
 }
 

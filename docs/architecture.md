@@ -226,7 +226,6 @@ sandbox layers are absent.
 | Queue views sort in memory | A view loads all matching rows before paging | Move sorting and `LIMIT` into SQL ([ADR 0012](adr/0012-sqlite-storage.md)) |
 | Sessions in memory | Restart logs users out | Persist sessions in the database |
 | New-report notice by polling | Up to 30 s delay; needs the script | Server-sent events |
-| PBKDF2 password hashing | Weaker against GPU attacks than a memory-hard function | Argon2id via `golang.org/x/crypto` ([ADR 0005](adr/0005-authentication-and-sessions.md)) |
 | Page script untested by automation | A regression shows up only in manual use | Browser test job in CI |
 | No screen-reader review | Markup checks cannot prove the experience | Manual audit with assistive technology |
 | Shared group accounts | No per-person audit trail | Personal accounts with group membership |

@@ -1,19 +1,36 @@
 package auth
 
 import (
+	"crypto/pbkdf2"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
-var fast = Hasher{Iterations: minIterations}
+var fast = Hasher{MemoryKiB: 64, Time: 1}
+
+// legacyHash builds a hash in the format used before Argon2id.
+func legacyHash(t testing.TB, pw string, iter int) string {
+	t.Helper()
+	salt := []byte("0123456789abcdef")
+	key, err := pbkdf2.Key(sha256.New, pw, salt, iter, keyLen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc := base64.RawStdEncoding
+	return fmt.Sprintf("pbkdf2-sha256$%d$%s$%s", iter, enc.EncodeToString(salt), enc.EncodeToString(key))
+}
 
 func TestHashVerify(t *testing.T) {
 	h, err := fast.Hash("correct horse battery")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(h, "pbkdf2-sha256$1000$") {
+	if !strings.HasPrefix(h, "$argon2id$v=19$m=64,t=1,p=1$") || strings.Count(h, "$") != 5 {
 		t.Errorf("hash format: %q", h)
 	}
 	h2, _ := fast.Hash("correct horse battery")
@@ -29,12 +46,23 @@ func TestHashVerify(t *testing.T) {
 	if Verify(h, strings.Repeat("x", MaxPasswordLen+1)) {
 		t.Error("oversized password accepted")
 	}
-	for _, bad := range []string{"", "x", "pbkdf2-sha256$1000$abc", "md5$1000$AAAAAAAAAAAAAAAAAAAAAA$AAAA",
-		"pbkdf2-sha256$5$AAAAAAAAAAAAAAAAAAAAAA$" + strings.Repeat("A", 43),
-		"pbkdf2-sha256$99999999999$AAAAAAAAAAAAAAAAAAAAAA$" + strings.Repeat("A", 43),
-		"pbkdf2-sha256$1000$!!$" + strings.Repeat("A", 43),
-		"pbkdf2-sha256$1000$AAAA$" + strings.Repeat("A", 43),
-		"pbkdf2-sha256$1000$AAAAAAAAAAAAAAAAAAAAAA$AAAA"} {
+	salt, key := "MDEyMzQ1Njc4OWFiY2RlZg", strings.Repeat("A", 43)
+	for _, bad := range []string{"", "x", "$argon2id$v=19$m=64,t=1,p=1$" + salt, "$argon2i$v=19$m=64,t=1,p=1$" + salt + "$" + key,
+		"$argon2id$v=16$m=64,t=1,p=1$" + salt + "$" + key,
+		"$argon2id$v=19$m=4,t=1,p=1$" + salt + "$" + key,       // too little memory
+		"$argon2id$v=19$m=4194304,t=1,p=1$" + salt + "$" + key, // 4 GiB: refused, not allocated
+		"$argon2id$v=19$m=64,t=0,p=1$" + salt + "$" + key,
+		"$argon2id$v=19$m=64,t=1000,p=1$" + salt + "$" + key,
+		"$argon2id$v=19$m=64,t=1,p=0$" + salt + "$" + key,
+		"$argon2id$v=19$m=64,t=1,p=200$" + salt + "$" + key,
+		"$argon2id$v=19$m=64,t=1,x=1$" + salt + "$" + key,
+		"$argon2id$v=19$m=64,t=-1,p=1$" + salt + "$" + key,
+		"$argon2id$v=19$m=64,t=1,p=1$!!$" + key,
+		"$argon2id$v=19$m=64,t=1,p=1$AAAA$" + key,
+		"$argon2id$v=19$m=64,t=1,p=1$" + salt + "$AAAA",
+		"md5$1000$" + salt + "$AAAA", "pbkdf2-sha256$1000$abc",
+		"pbkdf2-sha256$5$" + salt + "$" + key, "pbkdf2-sha256$99999999999$" + salt + "$" + key,
+		"pbkdf2-sha256$1000$!!$" + key, "pbkdf2-sha256$1000$AAAA$" + key, "pbkdf2-sha256$1000$" + salt + "$AAAA"} {
 		if verify(bad, "pw") || wellFormed(bad) {
 			t.Errorf("malformed hash %q accepted", bad)
 		}
@@ -42,11 +70,80 @@ func TestHashVerify(t *testing.T) {
 	if Verify("", "gr_report-dummy-password") {
 		t.Error("the dummy hash must never authenticate anyone")
 	}
-	if _, err := (Hasher{Iterations: 5}).Hash("x"); err == nil {
-		t.Error("too few iterations accepted")
+	for _, h := range []Hasher{{Time: 99}, {Threads: 99}, {MemoryKiB: 4}, {MemoryKiB: 1 << 30}, {MemoryKiB: 16, Threads: 4}} {
+		if _, err := h.Hash("x"); err == nil {
+			t.Errorf("parameters %+v accepted", h)
+		}
 	}
-	if !wellFormed(dummyHash) || !strings.Contains(dummyHash, "$600000$") {
-		t.Errorf("default work factor: %q", dummyHash)
+	// The default is the OWASP recommended Argon2id configuration.
+	if !strings.HasPrefix(dummyHash, "$argon2id$v=19$m=19456,t=2,p=1$") {
+		t.Errorf("default parameters: %q", dummyHash)
+	}
+}
+
+// Known-answer test from the Argon2 reference implementation
+// (argon2id, password "password", salt "somesalt", t=2, m=64 MiB, p=1,
+// 32-byte tag, digest 09316115d5cf24ed5a15a31a3ba326e5cf32edc24702987c
+// 02b6566f61913cf7): the PHC string for it must verify here.
+func TestArgon2ReferenceVector(t *testing.T) {
+	const phc = "$argon2id$v=19$m=65536,t=2,p=1$c29tZXNhbHQ$CTFhFdXPJO1aFaMaO6Mm5c8y7cJHAph8ArZWb2GRPPc"
+	if !verify(phc, "password") {
+		t.Error("reference vector does not verify")
+	}
+	if verify(phc, "Password") {
+		t.Error("reference vector verifies a wrong password")
+	}
+}
+
+func TestLegacyHashesAndRehash(t *testing.T) {
+	old := legacyHash(t, "password-from-before", 1000)
+	if !Verify(old, "password-from-before") || Verify(old, "wrong") {
+		t.Error("PBKDF2 hashes must keep verifying")
+	}
+	if !fast.NeedsRehash(old) || !fast.NeedsRehash("") {
+		t.Error("legacy or empty hash not flagged for rehash")
+	}
+	cur, _ := fast.Hash("pw")
+	if fast.NeedsRehash(cur) {
+		t.Error("current hash flagged for rehash")
+	}
+	// Raising the cost flags hashes made with the lower cost, and a
+	// stronger stored hash is left alone.
+	stronger := Hasher{MemoryKiB: 128, Time: 2}
+	if !stronger.NeedsRehash(cur) || !(Hasher{MemoryKiB: 64, Time: 2}).NeedsRehash(cur) {
+		t.Error("weaker parameters not flagged")
+	}
+	strong, _ := stronger.Hash("pw")
+	if fast.NeedsRehash(strong) {
+		t.Error("stronger hash flagged")
+	}
+	if !(Hasher{MemoryKiB: 64, Time: 1, Threads: 2}).NeedsRehash(cur) {
+		t.Error("different lane count not flagged")
+	}
+}
+
+// Many simultaneous verifications must all complete: the limit on
+// concurrent derivations queues, it does not reject.
+func TestConcurrentVerify(t *testing.T) {
+	h, _ := fast.Hash("pw-concurrent")
+	var wg sync.WaitGroup
+	fail := make(chan string, 4*MaxConcurrent)
+	for i := 0; i < 4*MaxConcurrent; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if Verify(h, "pw-concurrent") != true || Verify(h, "nope") {
+				fail <- fmt.Sprint("goroutine ", i)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(fail)
+	for f := range fail {
+		t.Error("wrong result in", f)
+	}
+	if cap(slots) != MaxConcurrent || len(slots) != 0 {
+		t.Errorf("slots: cap %d, in use %d", cap(slots), len(slots))
 	}
 }
 
@@ -238,29 +335,31 @@ func TestLimiterBounded(t *testing.T) {
 	}
 }
 
-// FuzzVerify checks that malformed stored hashes never panic and never
-// authenticate.
+// FuzzVerify checks that malformed stored hashes never panic, never
+// authenticate and never make the server allocate without bound.
 func FuzzVerify(f *testing.F) {
 	good, _ := fast.Hash("password-1")
 	f.Add(good, "password-1")
-	f.Add("pbkdf2-sha256$1000$$", "")
+	f.Add(legacyHash(f, "password-1", 1000), "password-1")
+	f.Add("$argon2id$v=19$m=4294967295,t=4294967295,p=255$AAAAAAAAAAA$AAAA", "x")
 	f.Add("pbkdf2-sha256$-1$AAAA$AAAA", "x")
+	f.Add("$argon2id$v=19$m=,t=,p=$$", "")
 	f.Fuzz(func(t *testing.T, encoded, pw string) {
-		if strings.Count(encoded, "$") == 3 {
-			// Keep the fuzzer fast: skip huge but valid work factors.
-			if it, _, _, ok := parse(encoded); ok && it > 5000 {
+		// Keep the fuzzer fast: skip well-formed hashes with a real cost.
+		if a, ok := parseArgon2(encoded); ok {
+			if a.m > maxMemoryKiB || a.t > maxTime || a.p > maxThreads {
+				t.Fatalf("parameters beyond the bounds accepted: %+v", a)
+			}
+			if a.m > 256 || a.t > 2 {
 				return
 			}
 		}
-		ok := verify(encoded, pw)
-		if ok && !wellFormed(encoded) {
+		if it, _, _, ok := parsePBKDF2(encoded); ok && it > 5000 {
+			return
+		}
+		if verify(encoded, pw) && !wellFormed(encoded) {
 			t.Errorf("malformed hash %q verified", encoded)
 		}
-		if ok && encoded != good {
-			// Only reachable when the fuzzer derived a matching key.
-			if _, _, _, wf := parse(encoded); !wf {
-				t.Error("verified without a parsable hash")
-			}
-		}
+		_ = fast.NeedsRehash(encoded)
 	})
 }

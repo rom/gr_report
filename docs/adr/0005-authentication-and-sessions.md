@@ -1,6 +1,6 @@
 # 0005 – Passwords with PBKDF2, server-side in-memory sessions
 
-* Status: Accepted
+* Status: Accepted; the choice of hash function is superseded by [0015](0015-argon2id.md)
 * Date: 2026-11-16
 * ASRs: Q-2, Q-3
 
@@ -39,6 +39,7 @@ credentials are handed out on paper.
   are allowed since [ADR 0010](0010-vetted-dependencies.md), so moving to
   Argon2id (`golang.org/x/crypto`) is a reasonable follow-up; the hash
   format already carries its algorithm name to allow a gradual change.
+  Done in [ADR 0015](0015-argon2id.md).
 * **TOTP second factor.** Out of proportion for shared group accounts.
 
 ## Consequences

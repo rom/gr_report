@@ -81,10 +81,15 @@ connection.
 
 ## internal/auth
 
-* **Passwords.** `pbkdf2-sha256$<iterations>$<salt>$<key>`, 16-byte salt,
-  32-byte key, 600 000 iterations by default, parameters read back from
-  the hash so the work factor can be raised later. Verification of an
-  unknown user runs against a dummy hash to keep timing uniform.
+* **Passwords.** Argon2id, stored as
+  `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<key>` (16-byte salt, 32-byte
+  key). Parameters are read back from the hash, within fixed bounds, so
+  the cost can be raised later. At most `MaxConcurrent` (4) derivations
+  run at once; the rest queue. Hashes in the earlier
+  `pbkdf2-sha256$<iterations>$<salt>$<key>` format still verify;
+  `Hasher.NeedsRehash` tells the login handler to replace a hash that uses
+  the old scheme or weaker parameters. Verification of an unknown user
+  runs against a dummy hash to keep timing uniform.
   Minimum length 10 characters; generated one-time passwords are 16
   characters from a 55-symbol alphabet without look-alikes (≈ 92 bits).
 * **Sessions.** Map from SHA-256(token) to `{user, csrf, flash, created,
