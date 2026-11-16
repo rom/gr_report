@@ -261,7 +261,40 @@ func TestChatOversight(t *testing.T) {
 	leader.get("/chat/all").want(t, 200, "Oversight of group conversations", "Group Alpha ↔ Group Bravo", `href="`+view+`"`)
 	r = leader.get(view).want(t, 200, "Group Alpha ↔ Group Bravo", "sent under oversight", "reply under oversight",
 		"Oversight: you can read this conversation between two groups but not write in it.")
-	r.wantNot(t, "private before oversight", "<textarea", `data-url="/api/chat`, `id="send"`)
+	r.wantNot(t, "private before oversight", "<textarea", `id="send"`, `data-url="/api/chat/`+A, "chat-overseen")
+	// The view updates live from its own endpoint, which serves only
+	// overseen messages and does not mark anything read.
+	api := "/api" + view
+	if !strings.Contains(r.body, `data-url="`+api+`" data-after="3"`) {
+		t.Errorf("oversight page does not poll its own endpoint: %s", r.body)
+	}
+	if got := poll(t, leader, api); len(got.Messages) != 2 || got.Messages[0].Body != "sent under oversight" || got.Messages[0].Mine {
+		t.Errorf("oversight poll = %+v", got.Messages)
+	}
+	if got := poll(t, leader, api+"?after=3"); len(got.Messages) != 0 {
+		t.Errorf("nothing new expected, got %+v", got.Messages)
+	}
+	alpha.post("/chat/"+B, "body", "arrives live")
+	if got := poll(t, leader, api+"?after=3"); len(got.Messages) != 1 || got.Messages[0].Body != "arrives live" || got.Messages[0].Sender != "Group Alpha" {
+		t.Errorf("live oversight poll = %+v", got.Messages)
+	}
+	if got := poll(t, leader, api+"?after=-9"); len(got.Messages) != 3 {
+		t.Errorf("bad cursor: %+v", got.Messages)
+	}
+	for _, m := range poll(t, leader, api).Messages {
+		if strings.Contains(m.Body, "private") {
+			t.Errorf("oversight poll leaked a private message: %+v", m)
+		}
+	}
+	// Bravo still has both unread: alpha's live message here and the one
+	// in the shared conversation.
+	if _, chat := counts(t, bravo); chat != 2 {
+		t.Errorf("bravo unread = %d, want 2; the leader's polling must not mark messages read", chat)
+	}
+	alpha.get(api).want(t, 403)
+	e.login("admin").get(api).want(t, 403)
+	leader.get("/api/chat/oversight/"+A+"/nope").want(t, 404)
+	leader.get("/api/chat/oversight/"+A+"/"+A).want(t, 404)
 	leader.get("/chat/oversight/"+B+"/"+A).want(t, 200, "sent under oversight") // either order
 	// The normal routes still give the leader nothing of it, and there is
 	// no write path.
@@ -296,6 +329,7 @@ func TestChatOversight(t *testing.T) {
 	// messages are private; what was marked stays marked for the groups.
 	e.srv.ChatOversight = false
 	leader.get(view).want(t, 404)
+	leader.get("/api"+view).want(t, 404) // an already open page stops receiving
 	alpha.post("/chat/"+B, "body", "private again").want(t, 200, "Only Group Bravo and your group", tag).wantNot(t, "Oversight is on")
 	e.srv.ChatOversight = true
 	leader.get(view).want(t, 200, "sent under oversight").wantNot(t, "private again", "private before oversight")
@@ -312,5 +346,5 @@ func TestChatOversight(t *testing.T) {
 	if m == nil {
 		t.Fatal("no link to earlier messages")
 	}
-	leader.get(m[1]).want(t, 200, "bulk-004-end", "sent under oversight", "Show the latest messages").wantNot(t, "private before oversight")
+	leader.get(m[1]).want(t, 200, "bulk-004-end", "sent under oversight", "Show the latest messages").wantNot(t, "private before oversight", `data-url="/api/chat`)
 }

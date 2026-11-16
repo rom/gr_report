@@ -74,7 +74,8 @@ the exercise starts** if you want it from the beginning; messages written
 earlier stay private and cannot be opened up afterwards. Switching it off
 closes the leaders' view at once. The setting takes effect at start, so
 changing it means restarting the service; its state is logged at start, and
-every look by a leader is logged as `event=chat_oversight_view`.
+every look by a leader is logged as `event=chat_oversight_view` (with
+`live=true` when an open page received new messages).
 
 Tell the participants in the exercise instructions whether oversight is
 used.

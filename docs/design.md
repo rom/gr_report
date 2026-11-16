@@ -146,6 +146,7 @@ handler → html/template → response
 | `POST /chat/{peer}` | group, leader | Send a message |
 | `GET /api/chat/{peer}?after=seq` | group, leader | New messages as JSON; marks them read |
 | `GET /chat/oversight/{a}/{b}` | leader | With oversight on: read-only view of the overseen messages between groups `a` and `b` |
+| `GET /api/chat/oversight/{a}/{b}?after=seq` | leader | New overseen messages as JSON for that view; marks nothing read |
 | `GET /requests`, `GET /requests/{id}` | group, leader | List and read requests |
 | `GET /requests/new`, `POST /requests`, `POST /requests/{id}/close` | leader | Send, close, reopen |
 | `GET /templates`, `GET /templates/new`, `GET,POST /templates/{id}`, `POST /templates`, `POST /templates/{id}/archive` | leader, admin | Templates |
@@ -168,8 +169,10 @@ handler → html/template → response
   viewing an older page does not.
 * A message between two groups gets `overseen = 1` exactly when
   `Server.ChatOversight` is on at the moment it is sent. The oversight
-  route queries with `overseen = 1` only, exists only while the setting is
-  on, has no `POST`, never marks anything read, and writes an audit entry.
+  page and its polling endpoint share one check (`oversightPair`), query
+  with `overseen = 1` only, exist only while the setting is on, have no
+  `POST`, never mark anything read, and write an audit entry – the endpoint
+  only when it delivers messages.
 * The `return` parameter of a bulk action is re-parsed into known queue
   parameters and can only lead back to `/queue`.
 * The template editor is plain HTML: existing fields plus three empty

@@ -91,10 +91,13 @@ type chatView struct {
 	// can read what they send in this conversation.
 	Oversight string
 	// Overseen lists the conversations a leader can look into; ReadOnly
-	// marks the page as such a look (no form, no live updates).
+	// marks the page as such a look (no form).
 	Overseen []oversightLink
 	ReadOnly bool
 	BaseURL  string
+	// PollURL is where the page script fetches new messages; empty when
+	// an older page is shown.
+	PollURL string
 }
 
 // chatEnabled wraps the chat routes so they disappear when chat is off.
@@ -167,6 +170,9 @@ func (s *Server) chatPage(c *reqCtx, status int, draft, errMsg string) {
 				return
 			}
 		}
+	}
+	if before == 0 {
+		v.PollURL = "/api/chat/" + peer
 	}
 	switch {
 	case peer == model.ChatAll:
@@ -305,17 +311,27 @@ func (s *Server) oversightLinks(c *reqCtx, activeConv string) []oversightLink {
 	return out
 }
 
+// oversightPair resolves the two groups of an oversight request. It fails
+// unless oversight is on and both are distinct group accounts.
+func (s *Server) oversightPair(c *reqCtx) (a, b model.User, conv string, ok bool) {
+	a, okA := s.Store.User(c.r.PathValue("a"))
+	b, okB := s.Store.User(c.r.PathValue("b"))
+	if !s.ChatOversight || !okA || !okB || a.Role != model.RoleGroup || b.Role != model.RoleGroup || a.ID == b.ID {
+		return a, b, "", false
+	}
+	conv, _, _ = model.ChatConv(a.ID, b.ID)
+	return a, b, conv, true
+}
+
 // chatOversight shows a leader the overseen messages of a conversation
 // between two groups. It is read-only and every look is written to the
 // audit log.
 func (s *Server) chatOversight(c *reqCtx) {
-	a, okA := s.Store.User(c.r.PathValue("a"))
-	b, okB := s.Store.User(c.r.PathValue("b"))
-	if !s.ChatOversight || !okA || !okB || a.Role != model.RoleGroup || b.Role != model.RoleGroup || a.ID == b.ID {
+	a, b, conv, ok := s.oversightPair(c)
+	if !ok {
 		s.fail(c, http.StatusNotFound, c.t("No such conversation."))
 		return
 	}
-	conv, _, _ := model.ChatConv(a.ID, b.ID)
 	before, _ := strconv.ParseInt(c.r.URL.Query().Get("before"), 10, 64)
 	if before < 0 {
 		before = 0
@@ -329,6 +345,12 @@ func (s *Server) chatOversight(c *reqCtx) {
 		v.EarlierURL = v.BaseURL + "?before=" + strconv.FormatInt(msgs[0].Seq, 10)
 	}
 	v.Lines = chatLines(msgs, "")
+	if n := len(msgs); n > 0 {
+		v.Last = msgs[n-1].Seq
+	}
+	if before == 0 {
+		v.PollURL = "/api" + v.BaseURL
+	}
 	unread := s.Store.ChatUnread(model.ReceiverLeader)
 	cvAll, _, _ := model.ChatConv(model.ReceiverLeader, model.ChatAll)
 	v.Peers = append(v.Peers, chatPeer{ID: model.ChatAll, Name: c.t("Everyone"), Unread: unread[cvAll]})
@@ -339,4 +361,26 @@ func (s *Server) chatOversight(c *reqCtx) {
 	v.Overseen = s.oversightLinks(c, conv)
 	s.audit(c, "chat_oversight_view", "conversation", conv, "messages", len(msgs))
 	s.render(c, http.StatusOK, "chat", name, v, "")
+}
+
+// chatOversightPoll serves new overseen messages to the oversight page. It
+// applies the same checks as the page, never marks anything read, and adds
+// an audit entry whenever it actually delivers messages - an idle poll
+// every few seconds is not logged.
+func (s *Server) chatOversightPoll(c *reqCtx) {
+	_, _, conv, ok := s.oversightPair(c)
+	if !ok {
+		http.Error(c.w, "not found", http.StatusNotFound)
+		return
+	}
+	after, _ := strconv.ParseInt(c.r.URL.Query().Get("after"), 10, 64)
+	if after < 0 {
+		after = 0
+	}
+	msgs := s.Store.ChatMessages(conv, after, 0, chatPageSize, true)
+	if len(msgs) > 0 {
+		s.audit(c, "chat_oversight_view", "conversation", conv, "messages", len(msgs), "live", true)
+	}
+	c.w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(c.w).Encode(map[string]any{"messages": chatLines(msgs, "")})
 }

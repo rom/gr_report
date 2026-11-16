@@ -75,8 +75,9 @@ switched on later.
 *Oversight of group conversations* below your own conversations. Opening
 one shows the messages the two groups have exchanged under oversight. You
 can read but not write there – use the group's own conversation to contact
-a group – and the page does not update by itself. Each time you open one,
-that is recorded in the server's audit log.
+a group. New messages appear by themselves within a few seconds, as in any
+conversation. Each time you open one, and each time new messages are shown
+to you, that is recorded in the server's audit log.
 
 ## Logging in
 

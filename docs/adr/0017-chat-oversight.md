@@ -41,8 +41,14 @@ believe a conversation is private while it is being read.
   messages sent while it was on. The tags stay on those messages for the
   groups, because they were readable at the time.
 * **Accountability.** Each time a leader opens an overseen conversation,
-  an audit log entry records who, which conversation and how many messages
-  – not their text.
+  and each time the open page receives new messages, an audit log entry
+  records who, which conversation and how many messages – not their text.
+* **Live.** The oversight page polls
+  `GET /api/chat/oversight/{a}/{b}?after=<seq>` every 4 seconds, like a
+  normal conversation. The endpoint repeats every check of the page (leader
+  role, setting on, two distinct groups), returns flagged messages only and
+  never marks anything read. Polls that deliver nothing are not logged, so
+  the audit log is not flooded by an open page.
 * Conversations the leader is a party to anyway (*Everyone*, group ↔
   leader) are unaffected and carry no notice. Administrators still have no
   chat.
@@ -74,4 +80,6 @@ believe a conversation is private while it is being read.
   oversight was off); the page says so.
 * None of this limits someone with access to the database file, who can
   read every message regardless of the flag ([security.md](../security.md)).
-* The oversight view is not updated live; the leader reloads it.
+* An oversight page left open keeps receiving, and logging, new messages
+  until oversight is switched off or the leader's session ends. Without
+  JavaScript the leader reloads the page.

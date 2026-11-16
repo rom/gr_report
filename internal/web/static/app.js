@@ -111,7 +111,8 @@
             li.querySelector('.chat-sender').textContent = m.sender;
             li.querySelector('time').textContent = m.time;
             li.querySelector('.body').textContent = m.body;
-            if (m.overseen) { li.querySelector('.chat-overseen').hidden = false; }
+            var tag = li.querySelector('.chat-overseen');
+            if (m.overseen && tag) { tag.hidden = false; }
             log.appendChild(li);
             after = m.seq;
           });

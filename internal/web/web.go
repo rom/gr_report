@@ -495,6 +495,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /chat/{peer}", s.authed(s.chatEnabled(s.chatSend), group, leader))
 	mux.HandleFunc("GET /api/chat/{peer}", s.authed(s.chatEnabled(s.chatPoll), group, leader))
 	mux.HandleFunc("GET /chat/oversight/{a}/{b}", s.authed(s.chatEnabled(s.chatOversight), leader))
+	mux.HandleFunc("GET /api/chat/oversight/{a}/{b}", s.authed(s.chatEnabled(s.chatOversightPoll), leader))
 
 	mux.HandleFunc("GET /requests", s.authed(s.requests, group, leader))
 	mux.HandleFunc("GET /requests/new", s.authed(s.requestForm, leader))

@@ -238,7 +238,6 @@ sandbox layers are absent.
 | Sessions in memory | Restart logs users out | Persist sessions in the database |
 | New-report notice and chat by polling | Up to 30 s (notice) or 4 s (chat) delay; a request per open chat page every 4 s | Server-sent events |
 | No moderation of chat | Misuse can only be met by disabling an account or the chat; oversight (optional) only reads | Message removal by the leader |
-| Oversight view is not live | A leader following a conversation must reload | Poll the oversight view like a normal conversation |
 | Page script untested by automation | A regression shows up only in manual use | Browser test job in CI |
 | No screen-reader review | Markup checks cannot prove the experience | Manual audit with assistive technology |
 | Shared group accounts | No per-person audit trail | Personal accounts with group membership |
