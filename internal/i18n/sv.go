@@ -295,6 +295,25 @@ var sv = map[string]string{
 	"username must be 2-32 characters: a-z, 0-9, dot, dash, underscore": "användarnamnet måste ha 2–32 tecken: a–z, 0–9, punkt, bindestreck, understreck",
 	"unknown role": "okänd roll",
 
+	// --- chat ---
+	"Chat":                      "Chatt",
+	"Chat with %s":              "Chatt med %s",
+	"Conversations":             "Konversationer",
+	"Everyone":                  "Alla",
+	"Messages":                  "Meddelanden",
+	"Message to %s":             "Meddelande till %s",
+	"Send":                      "Skicka",
+	"No messages yet.":          "Inga meddelanden ännu.",
+	"Show earlier messages":     "Visa tidigare meddelanden",
+	"Show the latest messages":  "Visa de senaste meddelandena",
+	"unread messages":           "olästa meddelanden",
+	"No such conversation.":     "Konversationen finns inte.",
+	"The chat is switched off.": "Chatten är avstängd.",
+	"All groups and the exercise leader can read this conversation.":     "Alla grupper och övningsledaren kan läsa den här konversationen.",
+	"Only %s and the exercise leaders can read this conversation.":       "Endast %s och övningsledarna kan läsa den här konversationen.",
+	"Only %s and your group can read this conversation.":                 "Endast %s och er grupp kan läsa den här konversationen.",
+	"You are sending messages too quickly. Wait a moment and try again.": "Du skickar meddelanden för snabbt. Vänta en stund och försök igen.",
+
 	// --- validation messages and the names of fields they mention ---
 	"%s is required":                    "%s måste anges",
 	"%s must be at least %d characters": "%s måste ha minst %d tecken",

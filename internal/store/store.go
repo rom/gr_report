@@ -100,6 +100,24 @@ CREATE TABLE reports (
 CREATE INDEX reports_receiver ON reports (receiver_id, sender_id, status);
 CREATE INDEX reports_sender   ON reports (sender_id);
 CREATE INDEX reports_request  ON reports (request_id);
+`, `
+CREATE TABLE chat_messages (
+	seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+	conv         TEXT NOT NULL,
+	party_a      TEXT NOT NULL,
+	party_b      TEXT NOT NULL,
+	ts           INTEGER NOT NULL,
+	sender_party TEXT NOT NULL,
+	sender_name  TEXT NOT NULL,
+	body         TEXT NOT NULL
+) STRICT;
+CREATE INDEX chat_conv ON chat_messages (conv, seq);
+CREATE TABLE chat_read (
+	party TEXT NOT NULL,
+	conv  TEXT NOT NULL,
+	seq   INTEGER NOT NULL,
+	PRIMARY KEY (party, conv)
+) STRICT;
 `}
 
 // Store is safe for concurrent use.
@@ -633,4 +651,89 @@ func (s *Store) NewCount(receiverID string) int {
 	var n int
 	must(db.QueryRow(`SELECT COUNT(*) FROM reports WHERE receiver_id = ? AND status = 'new'`, receiverID).Scan(&n))
 	return n
+}
+
+// ---- chat ----
+
+// AddChatMessage stores a message and returns it with its sequence number.
+// a and b are the two parties of a direct conversation ("" for ChatAll).
+func (s *Store) AddChatMessage(m model.ChatMessage, a, b string) (model.ChatMessage, error) {
+	db, err := s.conn()
+	if err != nil {
+		return m, err
+	}
+	if m.Conv == "" || m.SenderParty == "" || m.Body == "" {
+		return m, errors.New("invalid chat message")
+	}
+	res, err := db.Exec(`INSERT INTO chat_messages (conv, party_a, party_b, ts, sender_party, sender_name, body) VALUES (?,?,?,?,?,?,?)`,
+		m.Conv, a, b, unix(m.Timestamp), m.SenderParty, m.SenderName, m.Body)
+	if err != nil {
+		return m, err
+	}
+	m.Seq, err = res.LastInsertId()
+	return m, err
+}
+
+// ChatMessages returns up to limit messages of a conversation in
+// chronological order: those after sequence number after when after > 0
+// (the oldest such), otherwise the newest ones before sequence number
+// before (0: the newest of all).
+func (s *Store) ChatMessages(conv string, after, before int64, limit int) []model.ChatMessage {
+	q := `SELECT seq, conv, ts, sender_party, sender_name, body FROM chat_messages WHERE conv = ?`
+	args := []any{conv}
+	switch {
+	case after > 0:
+		q += ` AND seq > ? ORDER BY seq ASC LIMIT ?`
+		args = append(args, after, limit)
+	case before > 0:
+		q += ` AND seq < ? ORDER BY seq DESC LIMIT ?`
+		args = append(args, before, limit)
+	default:
+		q += ` ORDER BY seq DESC LIMIT ?`
+		args = append(args, limit)
+	}
+	rows := s.query(q, args...)
+	defer rows.Close()
+	var out []model.ChatMessage
+	for rows.Next() {
+		var m model.ChatMessage
+		var ts int64
+		must(rows.Scan(&m.Seq, &m.Conv, &ts, &m.SenderParty, &m.SenderName, &m.Body))
+		m.Timestamp = fromUnix(ts)
+		out = append(out, m)
+	}
+	must(rows.Err())
+	if after <= 0 { // fetched newest first
+		for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+			out[i], out[j] = out[j], out[i]
+		}
+	}
+	return out
+}
+
+// MarkChatRead records that a party has seen a conversation up to seq. The
+// marker never moves backwards.
+func (s *Store) MarkChatRead(party, conv string, seq int64) error {
+	return s.exec(`INSERT INTO chat_read (party, conv, seq) VALUES (?,?,?)
+		ON CONFLICT(party, conv) DO UPDATE SET seq = MAX(seq, excluded.seq)`, party, conv, seq)
+}
+
+// ChatUnread returns, per conversation the party takes part in, the number
+// of messages from others that the party has not seen.
+func (s *Store) ChatUnread(party string) map[string]int {
+	rows := s.query(`SELECT m.conv, COUNT(*) FROM chat_messages m
+		LEFT JOIN chat_read r ON r.party = ? AND r.conv = m.conv
+		WHERE (m.conv = ? OR m.party_a = ? OR m.party_b = ?)
+		  AND m.sender_party <> ? AND m.seq > COALESCE(r.seq, 0)
+		GROUP BY m.conv`, party, model.ChatAll, party, party, party)
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var conv string
+		var n int
+		must(rows.Scan(&conv, &n))
+		out[conv] = n
+	}
+	must(rows.Err())
+	return out
 }

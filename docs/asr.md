@@ -15,6 +15,8 @@ and how it is verified.
 | F-5 | An administrator or the exercise leader creates templates | Template routes open to `leader` and `admin` only | `TestRoleAccess`, `TestTemplates` |
 | F-6 | The leader has a queue of incoming reports and can filter, sort, search and file them; by default one queue per group | Queue view with per-sender queues, `ReportFilter`, `SortReports`, status and folder | `TestReportFlow`, `TestQueuePagination`, `TestFilter`, `TestSort` |
 
+| F-7 | Participants can chat with each other (added in a later iteration) | Shared conversation plus direct conversations between parties, stored in SQLite, polled by the page ([ADR 0016](adr/0016-chat.md)) | `TestChatFlow`, `TestChatPollAndPaging`, `TestChatRateLimit`, `TestChat` (store) |
+
 ## Quality attribute drivers
 
 | ID | Quality | Requirement | Addressed by | Verified by |

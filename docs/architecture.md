@@ -107,6 +107,15 @@ erDiagram
 * Only `status` and `folder` of a report ever change; they belong to the
   receiver's handling of the report, not to the report itself.
 
+### Chat
+
+Chat is deliberately separate from reports. A **party** is a group account
+or the exercise leaders collectively. A **conversation** is either `all`
+or the unordered pair of two parties; it is a key computed on the fly, not
+a stored object. `chat_messages` holds immutable messages with a sequence
+number; `chat_read` holds, per party and conversation, the last sequence
+number seen. See [ADR 0016](adr/0016-chat.md).
+
 ## Queues
 
 A queue is not a stored object. It is the set of reports with a given
@@ -225,7 +234,8 @@ sandbox layers are absent.
 | --- | --- | --- |
 | Queue views sort in memory | A view loads all matching rows before paging | Move sorting and `LIMIT` into SQL ([ADR 0012](adr/0012-sqlite-storage.md)) |
 | Sessions in memory | Restart logs users out | Persist sessions in the database |
-| New-report notice by polling | Up to 30 s delay; needs the script | Server-sent events |
+| New-report notice and chat by polling | Up to 30 s (notice) or 4 s (chat) delay; a request per open chat page every 4 s | Server-sent events |
+| No oversight or moderation of chat | Misuse can only be met by disabling an account or the chat | Explicit, visible oversight setting; message removal |
 | Page script untested by automation | A regression shows up only in manual use | Browser test job in CI |
 | No screen-reader review | Markup checks cannot prove the experience | Manual audit with assistive technology |
 | Shared group accounts | No per-person audit trail | Personal accounts with group membership |

@@ -208,7 +208,7 @@ func (e *env) breakWrites() {
 		e.t.Fatal(err)
 	}
 	defer db.Close()
-	for _, table := range []string{"users", "templates", "requests", "reports"} {
+	for _, table := range []string{"users", "templates", "requests", "reports", "chat_messages"} {
 		q := "CREATE TRIGGER fail_" + table + " BEFORE INSERT ON " + table + " BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END"
 		if _, err := db.Exec(q); err != nil {
 			e.t.Fatal(err)

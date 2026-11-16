@@ -70,6 +70,12 @@
             el.textContent = data.new;
             el.hidden = data.new === 0;
           });
+          if (typeof data.chat === 'number') {
+            each('.js-chat-count', function (el) {
+              el.textContent = data.chat;
+              el.hidden = data.chat === 0;
+            });
+          }
           document.title = (data.new ? '(' + data.new + ') ' : '') + baseTitle;
           if (data.new > seen) { live.hidden = false; }
           seen = Math.max(seen, data.new);
@@ -77,5 +83,43 @@
         .catch(function () { /* offline: try again next time */ });
     };
     window.setInterval(poll, 30000);
+  }
+
+  // Chat: fetch new messages every few seconds and append them. Lines are
+  // built from a <template> with textContent, never from HTML strings.
+  var log = document.getElementById('chat-log');
+  var lineTpl = document.getElementById('chat-line');
+  if (log && lineTpl && window.fetch && log.getAttribute('data-url')) {
+    var after = parseInt(log.getAttribute('data-after'), 10) || 0;
+    var box = log.parentNode;
+    var atBottom = function () { return box.scrollHeight - box.scrollTop - box.clientHeight < 40; };
+    box.scrollTop = box.scrollHeight;
+    var busy = false;
+    var pollChat = function () {
+      if (busy) { return; }
+      busy = true;
+      fetch(log.getAttribute('data-url') + '?after=' + after, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          busy = false;
+          if (!data || !data.messages || !data.messages.length) { return; }
+          var stick = atBottom();
+          data.messages.forEach(function (m) {
+            if (m.seq <= after) { return; }
+            var li = lineTpl.content.firstElementChild.cloneNode(true);
+            if (m.mine) { li.className += ' mine'; }
+            li.querySelector('.chat-sender').textContent = m.sender;
+            li.querySelector('time').textContent = m.time;
+            li.querySelector('.body').textContent = m.body;
+            log.appendChild(li);
+            after = m.seq;
+          });
+          var empty = document.getElementById('chat-empty');
+          if (empty) { empty.hidden = true; }
+          if (stick) { box.scrollTop = box.scrollHeight; }
+        })
+        .catch(function () { busy = false; });
+    };
+    window.setInterval(pollChat, 4000);
   }
 })();

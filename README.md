@@ -11,6 +11,9 @@ of people report to an exercise leader.
   attached for the answer.
 * The **administrator** or the exercise leader creates report templates. The
   administrator manages the accounts.
+* Groups and the exercise leader can **chat**: one conversation for
+  everyone, and direct conversations between two groups or between a group
+  and the exercise leader.
 
 Every report carries at least a timestamp, the sender, a subject, the
 content and the receiver.

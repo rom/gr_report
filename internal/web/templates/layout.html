@@ -22,10 +22,12 @@
     <li><a href="/requests"{{if $.Nav "/requests"}} aria-current="page"{{end}}>{{$.T "Requests"}}</a></li>
     <li><a href="/queue"{{if $.Nav "/queue"}} aria-current="page"{{end}}>{{$.T "Inbox"}} <span class="badge js-new-count"{{if not .NewCount}} hidden{{end}}>{{.NewCount}}</span><span class="sr-only"> {{$.T "new reports"}}</span></a></li>
     <li><a href="/sent"{{if $.Nav "/sent"}} aria-current="page"{{end}}>{{$.T "Sent"}}</a></li>
+    {{if .Chat}}<li><a href="/chat"{{if $.Nav "/chat"}} aria-current="page"{{end}}>{{$.T "Chat"}} <span class="badge js-chat-count"{{if not .ChatNew}} hidden{{end}}>{{.ChatNew}}</span><span class="sr-only"> {{$.T "unread messages"}}</span></a></li>{{end}}
   {{else if eq .User.Role "leader"}}
     <li><a href="/queue"{{if $.Nav "/queue"}} aria-current="page"{{end}}>{{$.T "Queue"}} <span class="badge js-new-count"{{if not .NewCount}} hidden{{end}}>{{.NewCount}}</span><span class="sr-only"> {{$.T "new reports"}}</span></a></li>
     <li><a href="/requests"{{if $.Nav "/requests"}} aria-current="page"{{end}}>{{$.T "Requests"}}</a></li>
     <li><a href="/templates"{{if $.Nav "/templates"}} aria-current="page"{{end}}>{{$.T "Templates"}}</a></li>
+    {{if .Chat}}<li><a href="/chat"{{if $.Nav "/chat"}} aria-current="page"{{end}}>{{$.T "Chat"}} <span class="badge js-chat-count"{{if not .ChatNew}} hidden{{end}}>{{.ChatNew}}</span><span class="sr-only"> {{$.T "unread messages"}}</span></a></li>{{end}}
   {{else}}
     <li><a href="/admin/users"{{if $.Nav "/admin/users"}} aria-current="page"{{end}}>{{$.T "Accounts"}}</a></li>
     <li><a href="/templates"{{if $.Nav "/templates"}} aria-current="page"{{end}}>{{$.T "Templates"}}</a></li>

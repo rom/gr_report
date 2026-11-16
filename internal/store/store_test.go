@@ -341,6 +341,7 @@ func TestReadFailurePanics(t *testing.T) {
 		"Request": func() { s.Request("q1") }, "Requests": func() { s.Requests() },
 		"Report": func() { s.Report("r1") }, "Reports": func() { s.Reports(nil) },
 		"Stats": func() { s.Stats("leader") }, "NewCount": func() { s.NewCount("leader") },
+		"ChatMessages": func() { s.ChatMessages("all", 0, 0, 1) }, "ChatUnread": func() { s.ChatUnread("g1") },
 	}
 	for name, fn := range reads {
 		func() {
@@ -390,6 +391,133 @@ func TestCorruptRowsFailLoudly(t *testing.T) {
 	}
 	if _, err := s.UpdateReport("r1", func(*model.Report) bool { return true }); err == nil {
 		t.Error("UpdateReport on a damaged row succeeded")
+	}
+}
+
+func TestChat(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	send := func(party, name, peer, body string) model.ChatMessage {
+		t.Helper()
+		conv, a, b := model.ChatConv(party, peer)
+		m, err := s.AddChatMessage(model.ChatMessage{Conv: conv, Timestamp: t0, SenderParty: party, SenderName: name, Body: body}, a, b)
+		if err != nil || m.Seq == 0 {
+			t.Fatalf("AddChatMessage: %+v, %v", m, err)
+		}
+		return m
+	}
+	m1 := send("g1", "Alpha", model.ChatAll, "hello all")
+	m2 := send("leader", "Leader", model.ChatAll, "welcome")
+	send("g1", "Alpha", "g2", "psst bravo")
+	m4 := send("g2", "Bravo", "g1", "yes?")
+	send("g2", "Bravo", "leader", "question")
+	if m2.Seq <= m1.Seq {
+		t.Error("sequence numbers do not increase")
+	}
+	// Both sides of a direct conversation use the same key.
+	c12, _, _ := model.ChatConv("g1", "g2")
+	c21, _, _ := model.ChatConv("g2", "g1")
+	cl2, _, _ := model.ChatConv("leader", "g2")
+	if c12 != c21 || c12 == cl2 {
+		t.Fatalf("conversation keys: %q %q %q", c12, c21, cl2)
+	}
+
+	all := s.ChatMessages(model.ChatAll, 0, 0, 10)
+	if len(all) != 2 || all[0].Body != "hello all" || all[1].Body != "welcome" || !all[0].Timestamp.Equal(t0) || all[1].SenderName != "Leader" {
+		t.Errorf("all = %+v", all)
+	}
+	if got := s.ChatMessages(c12, 0, 0, 10); len(got) != 2 || got[0].Body != "psst bravo" || got[1].SenderParty != "g2" {
+		t.Errorf("direct = %+v", got)
+	}
+	if got := s.ChatMessages(model.ChatAll, 0, 0, 1); len(got) != 1 || got[0].Seq != m2.Seq {
+		t.Errorf("limit keeps the newest: %+v", got)
+	}
+	if got := s.ChatMessages(model.ChatAll, m1.Seq, 0, 10); len(got) != 1 || got[0].Seq != m2.Seq {
+		t.Errorf("after = %+v", got)
+	}
+	if got := s.ChatMessages(model.ChatAll, 0, m2.Seq, 10); len(got) != 1 || got[0].Seq != m1.Seq {
+		t.Errorf("before = %+v", got)
+	}
+	if got := s.ChatMessages("nobody|here", 0, 0, 10); len(got) != 0 {
+		t.Errorf("unknown conversation = %+v", got)
+	}
+
+	// Unread: only messages from others, only in the party's conversations.
+	want := func(party string, exp map[string]int) {
+		t.Helper()
+		got := s.ChatUnread(party)
+		if len(got) != len(exp) {
+			t.Errorf("unread %s = %v, want %v", party, got, exp)
+		}
+		for k, v := range exp {
+			if got[k] != v {
+				t.Errorf("unread %s[%s] = %d, want %d", party, k, got[k], v)
+			}
+		}
+	}
+	want("g1", map[string]int{model.ChatAll: 1, c12: 1})
+	want("g2", map[string]int{model.ChatAll: 2, c12: 1})
+	want("leader", map[string]int{model.ChatAll: 1, cl2: 1})
+	want("g3", map[string]int{model.ChatAll: 2})
+
+	if err := s.MarkChatRead("g1", c12, m4.Seq); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkChatRead("g1", model.ChatAll, m2.Seq); err != nil {
+		t.Fatal(err)
+	}
+	want("g1", map[string]int{})
+	want("g2", map[string]int{model.ChatAll: 2, c12: 1}) // the other side is unaffected
+	// The marker never moves backwards.
+	if err := s.MarkChatRead("g1", model.ChatAll, 1); err != nil {
+		t.Fatal(err)
+	}
+	want("g1", map[string]int{})
+	send("leader", "Leader", model.ChatAll, "new one")
+	want("g1", map[string]int{model.ChatAll: 1})
+
+	for _, bad := range []model.ChatMessage{{}, {Conv: "all", Body: "x"}, {Conv: "all", SenderParty: "g1"}} {
+		if _, err := s.AddChatMessage(bad, "", ""); err == nil {
+			t.Errorf("invalid message %+v accepted", bad)
+		}
+	}
+	// Messages and read markers survive a restart.
+	s.Close()
+	s2 := open(t, dir)
+	if got := s2.ChatMessages(model.ChatAll, 0, 0, 10); len(got) != 3 || got[2].Body != "new one" {
+		t.Errorf("after reopen: %+v", got)
+	}
+	if got := s2.ChatUnread("g1"); got[model.ChatAll] != 1 || len(got) != 1 {
+		t.Errorf("unread after reopen: %v", got)
+	}
+	s2.Close()
+	if _, err := s2.AddChatMessage(model.ChatMessage{Conv: "all", SenderParty: "g1", Body: "x"}, "", ""); !errors.Is(err, ErrClosed) {
+		t.Errorf("write on closed store: %v", err)
+	}
+	if err := s2.MarkChatRead("g1", "all", 1); !errors.Is(err, ErrClosed) {
+		t.Errorf("mark on closed store: %v", err)
+	}
+}
+
+// A database created before the chat existed is upgraded in place.
+func TestMigrationFromVersion1(t *testing.T) {
+	dir := t.TempDir()
+	saved := migrations
+	migrations = saved[:1]
+	s, err := Open(dir)
+	migrations = saved
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(t, s)
+	s.Close()
+	s2 := open(t, dir)
+	if len(s2.Reports(nil)) != 4 || len(s2.Users()) != 4 {
+		t.Error("data lost in the upgrade")
+	}
+	conv, a, b := model.ChatConv("g1", "g2")
+	if _, err := s2.AddChatMessage(model.ChatMessage{Conv: conv, Timestamp: t0, SenderParty: "g1", SenderName: "A", Body: "hi"}, a, b); err != nil {
+		t.Errorf("chat unusable after upgrade: %v", err)
 	}
 }
 

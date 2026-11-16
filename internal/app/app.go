@@ -200,6 +200,7 @@ func (a *App) Run(ctx context.Context) error {
 	if a.Cfg.Lang != "" {
 		srv.DefaultLang = a.Cfg.Lang
 	}
+	srv.Chat = a.Cfg.Chat
 
 	ln, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {

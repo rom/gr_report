@@ -210,6 +210,8 @@ func TestRoleAccess(t *testing.T) {
 		{"/sent", 403, 403, 200},
 		{"/requests", 403, 200, 200},
 		{"/requests/new", 403, 200, 403},
+		{"/chat/all", 403, 200, 200},
+		{"/api/chat/all", 403, 200, 200},
 		{"/templates", 200, 200, 403},
 		{"/templates/new", 200, 200, 403},
 		{"/templates/" + e.id["SITREP"], 200, 200, 403},
@@ -234,7 +236,7 @@ func TestRoleAccess(t *testing.T) {
 	}{
 		{"/admin/users", "leader", 403}, {"/admin/users", "alpha", 403},
 		{"/templates", "alpha", 403}, {"/requests", "alpha", 403}, {"/requests", "admin", 403},
-		{"/reports", "leader", 403}, {"/reports", "admin", 403}, {"/queue/bulk", "admin", 403},
+		{"/reports", "leader", 403}, {"/reports", "admin", 403}, {"/queue/bulk", "admin", 403}, {"/chat/all", "admin", 403},
 		{"/templates/" + e.id["SITREP"] + "/archive", "alpha", 403},
 	}
 	for _, p := range posts {
@@ -619,6 +621,11 @@ func TestOutputEscaping(t *testing.T) {
 	leader.post("/reports/"+id+"/status", "action", "file", "folder", `"><script>f</script>`)
 	leader.post("/templates", "name", evil, "description", evil, "rows", "1", "f0_label", evil, "f0_type", "select", "f0_opts", evil)
 	leader.post("/requests", "subject", evil, "body", evil, "template", e.id["Minimal report"], "to", "all")
+	leader.post("/chat/all", "body", evil)
+	alpha.post("/chat/leader", "body", evil)
+	for _, c := range []*client{alpha, leader} {
+		c.get("/chat/all").want(t, 200, "&lt;script&gt;").wantNot(t, "<script>", "<img src=x")
+	}
 	for _, c := range []*client{alpha, leader} {
 		for _, p := range []string{"/queue", "/requests", "/reports/" + id, "/queue?q=" + url.QueryEscape(evil) + "&folder=" + url.QueryEscape(evil)} {
 			c.get(p).want(t, 200).wantNot(t, "<script>", "<img src=x")
@@ -672,6 +679,7 @@ func TestWriteFailure(t *testing.T) {
 		c.post(path, kv...).want(t, 500, "could not be saved")
 	}
 	post(alpha, "/reports", "template", e.id["Minimal report"], "subject", "s2", "content", "c")
+	post(alpha, "/chat/all", "body", "hello")
 	post(alpha, "/password", "current", pw("alpha"), "new", "another-password", "confirm", "another-password")
 	post(leader, "/templates", "name", "x")
 	post(leader, "/templates/"+e.id["SITREP"]+"/archive", "archived", "1")

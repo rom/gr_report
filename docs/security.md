@@ -22,7 +22,10 @@
 | SQL injection | Every value is a bound parameter, no SQL text is built from input; `LIKE` wildcards in search terms are escaped; a fuzz target cross-checks the SQL search against a reference matcher |
 | Click-jacking | `frame-ancestors 'none'`, `X-Frame-Options: DENY` |
 | A participant reading or changing another group's data | Role check on every route, object-level check on every report and request, queue actions limited to the user's own queue |
-| Forged sender or time | Both are taken from the session and the server clock, never from the form |
+| Forged sender or time | Both are taken from the session and the server clock, never from the form – for reports and chat messages alike |
+| Reading someone else's chat | A conversation is derived from the requester's own party and the peer in the URL; a conversation one is not part of cannot be named |
+| Chat flooding | 20 messages per user per minute, 2 000 characters per message, the general request limits |
+| Script injection through chat | Messages are escaped by the template; the script appends new ones with `textContent` only |
 | Resource exhaustion | Request body limit 256 KiB, header limit 32 KiB, read/write/idle time-outs, field length limits, bounded session and throttle tables, `MemoryMax`/`TasksMax` in the unit |
 | Corrupt stored data | SQLite integrity check at start; `STRICT` tables; a file that is not a database is refused, never overwritten; a damaged row fails loudly instead of being shown half-read |
 | Remote code execution in the server | Memory-safe language, no cgo and no C library in the process, and the sandbox layers below |
@@ -39,10 +42,14 @@ of service by flooding the network, and compromised participant devices.
 | Read a report | own sent / received | all | |
 | Change status / folder of a report | own inbox | leader queue | |
 | Send and close requests | | ✔ | |
+| Chat: shared conversation | ✔ | ✔ | |
+| Chat: direct conversation | own group's | those with the leader | |
 | Create, edit, archive templates | | ✔ | ✔ |
 | Manage accounts | | | ✔ |
 
-The administrator deliberately has no access to reports.
+The administrator deliberately has no access to reports or chat. The
+exercise leader cannot read a direct conversation between two groups
+([ADR 0016](adr/0016-chat.md)).
 
 ## Defence in depth
 
@@ -163,6 +170,10 @@ exists, so no program can be started.
   proxy all users share one address; run gr_report directly on the network
   or accept coarser throttling.
 * The database is not encrypted at rest; protect the disk and the backups.
+  This includes every chat conversation: whoever can read the database
+  file can read them, whatever the application's access rules say.
+* Chat messages are not written to the log, but the log does record who
+  sent a message in which conversation and when.
 * The language and theme cookies (`gr_lang`, `gr_theme`) are not
   security-relevant; they are `HttpOnly`, `SameSite=Lax` and validated on
   every request.

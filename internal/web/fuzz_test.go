@@ -56,6 +56,9 @@ func FuzzHandlers(f *testing.F) {
 	f.Add("/queue/bulk", "", "id=a&id=b&action=file&folder=<script>&return=%zz", false)
 	f.Add("/requests", "", "subject=<script>&template=x&to=some&recipient=<script>", false)
 	f.Add("/admin/users", "", "username=<script>", false)
+	f.Add("/chat/all", "before=-1", "body=<script>alert(1)</script>", true)
+	f.Add("/chat/leader", "before=99999999999999999999", "", true)
+	f.Add("/api/chat/../x", "after=x", "", false)
 	e := newEnv(f)
 	h := e.srv.Handler()
 	cookies := map[bool]*http.Cookie{}

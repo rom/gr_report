@@ -1,0 +1,36 @@
+{{define "content"}}
+{{$v := .Data}}
+<h1>{{$.T "Chat"}}</h1>
+<div class="layout">
+<nav class="panel" aria-labelledby="h-convs">
+  <h2 id="h-convs" class="sr-only">{{$.T "Conversations"}}</h2>
+  <ul class="queues">
+  {{range $v.Peers}}
+    <li><a href="/chat/{{.ID}}"{{if .Active}} class="active" aria-current="true"{{end}}><span>{{.Name}}</span>
+      {{if .Unread}}<span class="count"><span class="badge">{{.Unread}}</span><span class="sr-only"> {{$.T "unread messages"}}</span></span>{{end}}</a></li>
+  {{end}}
+  </ul>
+</nav>
+<section aria-labelledby="h-conv">
+  <h2 id="h-conv">{{$v.Peer.Name}}</h2>
+  <p class="help">{{$v.Privacy}}</p>
+  {{if $v.EarlierURL}}<p><a href="{{$v.EarlierURL}}">{{$.T "Show earlier messages"}}</a></p>{{end}}
+  {{if $v.Older}}<p><a href="/chat/{{$v.Peer.ID}}">{{$.T "Show the latest messages"}}</a></p>{{end}}
+  <div class="panel chat-box" tabindex="0" role="group" aria-label="{{$.T "Messages"}}">
+    <p class="muted" id="chat-empty"{{if $v.Lines}} hidden{{end}}>{{$.T "No messages yet."}}</p>
+    <ol class="chat-log" id="chat-log" role="log" aria-labelledby="h-conv"{{if not $v.Older}} data-url="/api/chat/{{$v.Peer.ID}}" data-after="{{$v.Last}}"{{end}}>
+    {{range $v.Lines}}
+      <li class="chat-line{{if .Mine}} mine{{end}}"><p class="chat-meta"><strong class="chat-sender">{{.Sender}}</strong> <time>{{.Time}}</time></p><p class="body">{{.Body}}</p></li>
+    {{end}}
+    </ol>
+  </div>
+  <template id="chat-line"><li class="chat-line"><p class="chat-meta"><strong class="chat-sender"></strong> <time></time></p><p class="body"></p></li></template>
+  <form class="panel" id="send" method="post" action="/chat/{{$v.Peer.ID}}"{{if .Error}} aria-describedby="error"{{end}}>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label for="body">{{$.T "Message to %s" $v.Peer.Name}}</label>
+    <textarea id="body" name="body" class="chat-input" maxlength="{{$v.MaxLen}}" required>{{$v.Draft}}</textarea>
+    <div class="actions"><button>{{$.T "Send"}}</button></div>
+  </form>
+</section>
+</div>
+{{end}}

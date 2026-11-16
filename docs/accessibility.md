@@ -74,6 +74,8 @@ The target is **WCAG 2.1 level AA**. What is built in:
   belong to; confirmations and the "new reports have arrived" notice are
   announced politely, without moving focus.
 * The page language is declared, so a screen reader uses the right voice.
+* The chat message list is a log region: new messages are announced
+  without moving focus. The list can be scrolled with the keyboard.
 
 **Seeing**
 

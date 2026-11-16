@@ -40,7 +40,7 @@ func TestParseConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Addr != ":8443" || cfg.DataDir != "./data" || cfg.Sandbox != sandbox.ModeAuto || cfg.InsecureHTTP || cfg.DevSeed || cfg.Lang != i18n.EN {
+	if cfg.Addr != ":8443" || cfg.DataDir != "./data" || cfg.Sandbox != sandbox.ModeAuto || cfg.InsecureHTTP || cfg.DevSeed || cfg.Lang != i18n.EN || !cfg.Chat {
 		t.Errorf("defaults = %+v", cfg)
 	}
 
@@ -70,6 +70,12 @@ func TestParseConfig(t *testing.T) {
 	}
 	if cfg, err = ParseConfig(tls, env(map[string]string{"GR_REPORT_LANG": "sv"}), io.Discard); err != nil || cfg.Lang != i18n.SV {
 		t.Errorf("GR_REPORT_LANG = %+v, %v", cfg, err)
+	}
+	if cfg, err = ParseConfig(append([]string{"-chat=false"}, tls...), env(nil), io.Discard); err != nil || cfg.Chat {
+		t.Errorf("-chat=false = %+v, %v", cfg, err)
+	}
+	if cfg, err = ParseConfig(tls, env(map[string]string{"GR_REPORT_CHAT": "off"}), io.Discard); err != nil || cfg.Chat {
+		t.Errorf("GR_REPORT_CHAT=off = %+v, %v", cfg, err)
 	}
 	if cfg, err = ParseConfig([]string{"-version"}, env(nil), io.Discard); err != nil || !cfg.ShowVersion {
 		t.Errorf("-version = %+v, %v", cfg, err)
@@ -190,7 +196,7 @@ func start(t *testing.T, a *App, scheme string) (string, func() error) {
 func TestRunHTTPDevSeed(t *testing.T) {
 	dir := t.TempDir()
 	var logs syncBuffer
-	a := &App{Cfg: Config{Addr: "127.0.0.1:0", DataDir: dir, InsecureHTTP: true, DevSeed: true, Sandbox: sandbox.ModeOff, Lang: i18n.SV},
+	a := &App{Cfg: Config{Addr: "127.0.0.1:0", DataDir: dir, InsecureHTTP: true, DevSeed: true, Sandbox: sandbox.ModeOff, Lang: i18n.SV, Chat: true},
 		Log: slog.New(slog.NewTextHandler(&logs, nil))}
 	base, stop := start(t, a, "http")
 
@@ -203,7 +209,7 @@ func TestRunHTTPDevSeed(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	// The configured default language applies when the browser asks for none.
-	if resp.StatusCode != 200 || !strings.Contains(string(body), "Rapportkö") || !strings.Contains(string(body), `<html lang="sv"`) {
+	if resp.StatusCode != 200 || !strings.Contains(string(body), "Rapportkö") || !strings.Contains(string(body), `<html lang="sv"`) || !strings.Contains(string(body), `href="/chat"`) {
 		t.Errorf("dev login: %d\n%s", resp.StatusCode, body)
 	}
 	if err := stop(); err != nil {

@@ -173,7 +173,7 @@ func TestNewCountAPI(t *testing.T) {
 		if r.header.Get("Cache-Control") != "no-store" {
 			t.Error("count response is cacheable")
 		}
-		var v struct{ New int }
+		var v struct{ New, Chat int }
 		if err := json.Unmarshal([]byte(r.body), &v); err != nil {
 			t.Fatalf("%v: %s", err, r.body)
 		}

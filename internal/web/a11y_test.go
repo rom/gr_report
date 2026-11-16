@@ -285,6 +285,8 @@ func TestAccessibility(t *testing.T) {
 	toAlpha := "/reports/" + bravo.send("Need a radio", "Can you lend us one?", "receiver", e.id["alpha"])
 	bravo.send("Arrived", "All present")
 	leader.post(sitrep+"/status", "action", "file", "folder", "Logistics")
+	alpha.post("/chat/all", "body", "Hello everyone")
+	leader.post("/chat/"+e.id["alpha"], "body", "A question for Alpha")
 
 	pages := []struct {
 		c     *client
@@ -293,9 +295,10 @@ func TestAccessibility(t *testing.T) {
 	}{
 		{e.anon(), "anonymous", []string{"/login", "/settings"}},
 		{alpha, "group", []string{"/home", "/requests", reqPath, "/queue", "/sent", "/sent?q=x", toAlpha, sitrep, "/settings", "/password",
-			"/reports/new?template=" + e.id["SITREP"], "/reports/new?request=" + reqID, "/reports/nope", "/admin/users"}},
+			"/reports/new?template=" + e.id["SITREP"], "/reports/new?request=" + reqID, "/reports/nope", "/admin/users",
+			"/chat/all", "/chat/leader", "/chat/" + e.id["bravo"], "/chat/nope"}},
 		{leader, "leader", []string{"/queue", "/queue?sort=subject&dir=asc&q=fine&status=filed", "/queue?q=nomatch", "/queue?auto=1", sitrep, "/requests", "/requests/new", reqPath,
-			"/templates", "/templates/new", "/templates/" + e.id["SITREP"], "/settings", "/password"}},
+			"/templates", "/templates/new", "/templates/" + e.id["SITREP"], "/settings", "/password", "/chat/all", "/chat/" + e.id["alpha"]}},
 		{admin, "admin", []string{"/admin/users", "/templates", "/templates/new", "/settings", "/queue"}},
 	}
 	for _, lang := range []string{"en", "sv"} {

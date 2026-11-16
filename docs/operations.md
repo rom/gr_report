@@ -53,6 +53,7 @@ reads `/etc/gr_report/gr_report.env`.
 | `-tls-key` | `GR_REPORT_TLS_KEY` | – | Private key (PEM) |
 | `-sandbox` | `GR_REPORT_SANDBOX` | `auto` | `auto`, `strict` or `off` |
 | `-lang` | `GR_REPORT_LANG` | `en` | Default language, `en` or `sv` |
+| `-chat` | `GR_REPORT_CHAT` | on | Chat between participants; `-chat=false` or `GR_REPORT_CHAT=off` removes it |
 | `-insecure-http` | `GR_REPORT_INSECURE_HTTP=1` | off | Plain HTTP, development only |
 | `-dev-seed` | – | off | Demo accounts; only with `-insecure-http` |
 | `-version` | – | | Print version |
@@ -221,7 +222,8 @@ Restore: stop the service, remove `gr_report.db-wal` and
 `gr_report.db-shm`, put the backup in place as `gr_report.db` (owner
 `gr_report`, mode `0600`), start the service.
 
-The database contains password hashes – treat backups as sensitive. It can
+The database contains password hashes and all chat conversations – treat
+backups as sensitive. It can
 be inspected with `sqlite3`, for example:
 
 ```bash
@@ -251,7 +253,8 @@ Password hashes made by an earlier version (PBKDF2) keep working and are
 converted to Argon2id the next time each user logs in.
 
 Sessions are kept in memory, so users log in again after a restart. The
-database schema is upgraded automatically at start; take a backup first. A
+database schema is upgraded automatically at start (for example, the chat
+tables are added to a database created by an earlier version); take a backup first. A
 database that was written by a newer version is refused rather than
 downgraded.
 

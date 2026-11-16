@@ -283,6 +283,15 @@ tbody tr:nth-child(even) { background: var(--row); }
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
 form.inlineform { display: inline; }
 .pager { display: flex; gap: 1rem; align-items: center; margin-top: .75rem; }
+.chat-box { max-height: 60vh; overflow-y: auto; }
+.chat-log { list-style: none; margin: 0; padding: 0; }
+.chat-line { padding: .4rem .6rem; border-left: 4px solid transparent; border-bottom: var(--line-width) solid var(--line); }
+.chat-line:last-child { border-bottom: 0; }
+.chat-line.mine { border-left-color: var(--accent); background: var(--row); }
+.chat-line p { margin: 0; }
+.chat-meta { color: var(--muted); font-size: .9rem; }
+.chat-meta strong { color: var(--ink); }
+textarea.chat-input { min-height: 4.5rem; }
 .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .75rem; list-style: none; padding: 0; margin: .5rem 0 0; }
 .swatch { border: var(--line-width) solid var(--border); border-radius: 6px; padding: .6rem; background: var(--bg); color: var(--ink); }
 .swatch .chip { display: inline-block; padding: 0 .5em; border-radius: 4px; background: var(--accent); color: var(--accent-ink); font-weight: 700; }

@@ -21,6 +21,7 @@ changed decision gets a new record that supersedes the old one.
 | [0013](0013-internationalisation.md) | English and Swedish from one message catalogue; language per browser | Accepted |
 | [0014](0014-accessibility-and-themes.md) | WCAG 2.1 AA as the bar; themes as checked colour sets | Accepted |
 | [0015](0015-argon2id.md) | Argon2id for password hashing, PBKDF2 hashes upgraded at login | Accepted |
+| [0016](0016-chat.md) | Chat: one shared conversation plus direct conversations between parties | Accepted |
 
 Template for new records:
 

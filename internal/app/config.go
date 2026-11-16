@@ -29,7 +29,9 @@ type Config struct {
 	Sandbox      sandbox.Mode
 	// Lang is the default user interface language, used when a browser
 	// states no preference, and the language of the starter templates.
-	Lang        i18n.Lang
+	Lang i18n.Lang
+	// Chat enables the chat between the participants.
+	Chat        bool
 	ShowVersion bool
 }
 
@@ -57,6 +59,7 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	fs.BoolVar(&cfg.DevSeed, "dev-seed", false, "create demo accounts with a known password on first start; needs -insecure-http")
 	fs.StringVar(&mode, "sandbox", env("GR_REPORT_SANDBOX", string(sandbox.ModeAuto)), "in-process sandbox `mode`: auto, strict or off (env GR_REPORT_SANDBOX)")
 	fs.StringVar(&lang, "lang", env("GR_REPORT_LANG", string(i18n.EN)), "default user interface `language`: en or sv (env GR_REPORT_LANG)")
+	fs.BoolVar(&cfg.Chat, "chat", env("GR_REPORT_CHAT", "on") != "off", "enable the chat between participants; -chat=false switches it off (env GR_REPORT_CHAT=off)")
 	fs.BoolVar(&cfg.ShowVersion, "version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return cfg, err

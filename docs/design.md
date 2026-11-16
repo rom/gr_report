@@ -31,6 +31,9 @@ Pure data and rules, no I/O.
   terms). The store translates it to SQL; `Match` is the reference
   implementation the SQL is fuzz-tested against. `SortReports` is stable
   and total: ties are broken by timestamp and ID.
+* **Chat.** `ChatParty(user)` maps a user to its party (group ID, or
+  `leader`); `ChatConv(party, peer)` gives the conversation key, identical
+  from both sides; `CleanChat` validates a message (1–2 000 characters).
 * **Errors** are `*i18n.Msg` values (message key and arguments) so the
   HTTP layer can show them in the user's language.
 
@@ -47,6 +50,8 @@ pure-Go driver ([ADR 0012](adr/0012-sqlite-storage.md)).
 | `templates` | `fields` (JSON array of field definitions), `archived` |
 | `requests` | `template_id`, `recipients` (JSON array, empty = all groups), `closed` |
 | `reports` | `ts` (Unix nanoseconds), sender and receiver IDs and names, `fields` (JSON array of key/label/value), `request_id`, `status`, `folder`, `search_text` |
+| `chat_messages` (migration 2) | `seq` (autoincrement, the cursor), `conv`, `party_a`, `party_b`, sender party and name, `body` |
+| `chat_read` (migration 2) | primary key (`party`, `conv`), `seq` last seen |
 
 Indexes on `reports(receiver_id, sender_id, status)`, `reports(sender_id)`
 and `reports(request_id)`. Tables are `STRICT`. There are no deletes:
@@ -76,6 +81,10 @@ connection.
   `search_text` is maintained on every write of a report (it includes the
   folder, which can change).
 * `Stats` and `NewCount` are aggregate queries.
+* `ChatMessages(conv, after, before, limit)` pages by sequence number;
+  `ChatUnread(party)` counts, per conversation of the party, messages from
+  others beyond the party's read marker; `MarkChatRead` only ever moves the
+  marker forward.
 * Read methods panic with `*store.Failure` when the database fails; the
   HTTP layer turns that into a 500 page.
 
@@ -132,7 +141,10 @@ handler → html/template → response
 | `POST /reports/{id}/status` | group, leader | Mark new/read, file in folder |
 | `GET /queue`, `POST /queue/bulk` | group, leader | Queue / inbox with filter, sort, search, bulk actions |
 | `GET /sent` | group | Sent reports |
-| `GET /api/new-count` | group, leader | JSON `{"new": n}` for the page script |
+| `GET /api/new-count` | group, leader | JSON `{"new": n, "chat": m}` for the page script |
+| `GET /chat`, `GET /chat/{peer}` | group, leader | Conversation list and messages; `peer` is `all`, `leader` or a group ID |
+| `POST /chat/{peer}` | group, leader | Send a message |
+| `GET /api/chat/{peer}?after=seq` | group, leader | New messages as JSON; marks them read |
 | `GET /requests`, `GET /requests/{id}` | group, leader | List and read requests |
 | `GET /requests/new`, `POST /requests`, `POST /requests/{id}/close` | leader | Send, close, reopen |
 | `GET /templates`, `GET /templates/new`, `GET,POST /templates/{id}`, `POST /templates`, `POST /templates/{id}/archive` | leader, admin | Templates |
@@ -149,6 +161,10 @@ handler → html/template → response
   non-group account.
 * Queue actions only touch reports whose receiver is the acting user's
   queue; IDs of other reports in a bulk request are silently skipped.
+* A chat conversation is resolved from the user's own party and the peer
+  in the path; peers that are the user itself, not a group, or unknown give
+  404. Viewing the newest page or polling marks the conversation read;
+  viewing an older page does not.
 * The `return` parameter of a bulk action is re-parsed into known queue
   parameters and can only lead back to `/queue`.
 * The template editor is plain HTML: existing fields plus three empty
@@ -169,8 +185,9 @@ script; no external resources.
   controls, `fieldset`/`legend`, table headers with `scope`, `aria-sort`,
   `aria-current`, errors as `role="alert"` linked to the form by
   `aria-describedby`, visible focus, no information by colour alone.
-* **Script** (`static/app.js`, optional): new-report notice by polling,
-  select-all, add-field row, theme preview. Elements that need it are
+* **Script** (`static/app.js`, optional): new-report notice and unread
+  chat counter by polling, live chat messages, select-all, add-field row,
+  theme preview. Elements that need it are
   rendered `hidden` with `data-js-show`. It never writes HTML.
 * Without the script, the optional `<meta http-equiv="refresh">` on the
   queue is the way to watch for new reports.

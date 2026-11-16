@@ -4,8 +4,8 @@
 
 | Role | Who | Can do |
 | --- | --- | --- |
-| `group` | One account per participating group (or person) | Write reports, answer requests, read reports sent to the group |
-| `leader` | The exercise leader(s) | Work the report queue, send requests, create templates |
+| `group` | One account per participating group (or person) | Write reports, answer requests, read reports sent to the group, chat |
+| `leader` | The exercise leader(s) | Work the report queue, send requests, create templates, chat |
 | `admin` | Whoever runs the tool | Create and manage accounts, create templates |
 
 All exercise leaders share one queue. An account with the `group` role is
@@ -30,6 +30,31 @@ everyone sharing a group account can have their own. See
 screen-reader support.
 
 This guide uses the English names of menus and buttons.
+
+## Chat
+
+**Chat** in the menu is for quick, informal messages; use reports for
+anything that should be on record.
+
+* **Everyone** – read by all groups and the exercise leader.
+* **Exercise leader** – a direct conversation between your group and the
+  exercise leaders. All leaders see it and any of them may answer.
+* **A group's name** – a direct conversation between your group and that
+  group. Nobody else can read it, not even the exercise leader.
+
+The line under the heading always says who can read the conversation you
+are looking at. Write in the box at the bottom and press **Send**. New
+messages appear by themselves within a few seconds (reload the page if your
+browser has JavaScript switched off). A red number next to a conversation,
+and next to **Chat** in the menu, counts unread messages.
+
+Remember that a group account is shared: everyone logged in to your group's
+account sees the group's conversations. Messages cannot be edited or
+deleted, are limited to 2 000 characters, and you can send at most 20 per
+minute. **Show earlier messages** pages back through the history.
+
+The person running the server can switch the chat off; the menu entry then
+disappears.
 
 ## Logging in
 

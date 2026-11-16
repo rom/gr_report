@@ -92,8 +92,11 @@ type Server struct {
 	// DefaultLang is used when neither a cookie nor the browser's
 	// Accept-Language header selects a supported language.
 	DefaultLang i18n.Lang
+	// Chat enables the chat between the participants.
+	Chat bool
 
-	pages map[string]*template.Template
+	chatLimit chatLimiter
+	pages     map[string]*template.Template
 }
 
 // New returns a Server with default session and throttling settings.
@@ -104,7 +107,7 @@ func New(st *store.Store, log *slog.Logger, secure bool) *Server {
 	ip.Burst, ip.Forget = 50, 10*time.Minute
 	s := &Server{
 		Store: st, Sessions: auth.NewSessions(), UserLimiter: auth.NewLimiter(), IPLimiter: ip,
-		Log: log, Secure: secure, Now: time.Now, DefaultLang: i18n.EN,
+		Log: log, Secure: secure, Now: time.Now, DefaultLang: i18n.EN, Chat: true,
 	}
 	s.pages = parsePages()
 	return s
@@ -162,6 +165,8 @@ type page struct {
 	Flash    string
 	Error    string
 	NewCount int
+	Chat     bool // show the chat in the navigation
+	ChatNew  int  // unread chat messages
 	Refresh  int
 	Data     any
 }
@@ -404,6 +409,7 @@ func (s *Server) render(c *reqCtx, status int, name, title string, data any, err
 		// Not on a server error page: the database may be what failed.
 		if q := queueID(&c.user); q != "" && status < http.StatusInternalServerError {
 			p.NewCount = s.Store.NewCount(q)
+			p.Chat, p.ChatNew = s.Chat, s.chatUnreadTotal(&c.user)
 		}
 	}
 	if v, ok := data.(*queueView); ok && v.P.Auto {
@@ -480,6 +486,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /sent", s.authed(s.sent, group))
 	mux.HandleFunc("GET /api/new-count", s.authed(s.newCount, group, leader))
 
+	mux.HandleFunc("GET /chat", s.authed(s.chatEnabled(s.chatRoot), group, leader))
+	mux.HandleFunc("GET /chat/{peer}", s.authed(s.chatEnabled(s.chat), group, leader))
+	mux.HandleFunc("POST /chat/{peer}", s.authed(s.chatEnabled(s.chatSend), group, leader))
+	mux.HandleFunc("GET /api/chat/{peer}", s.authed(s.chatEnabled(s.chatPoll), group, leader))
+
 	mux.HandleFunc("GET /requests", s.authed(s.requests, group, leader))
 	mux.HandleFunc("GET /requests/new", s.authed(s.requestForm, leader))
 	mux.HandleFunc("POST /requests", s.authed(s.requestCreate, leader))
@@ -511,11 +522,13 @@ func (s *Server) root(c *reqCtx) {
 	}
 }
 
-// newCount serves the number of new reports in the user's queue to the
-// page script, which shows a notice when reports arrive.
+// newCount serves the number of new reports in the user's queue and of
+// unread chat messages to the page script, which updates the counters and
+// shows a notice when reports arrive.
 func (s *Server) newCount(c *reqCtx) {
 	c.w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(c.w).Encode(map[string]int{"new": s.Store.NewCount(queueID(&c.user))})
+	_ = json.NewEncoder(c.w).Encode(map[string]int{
+		"new": s.Store.NewCount(queueID(&c.user)), "chat": s.chatUnreadTotal(&c.user)})
 }
 
 // ---- language and theme ----
