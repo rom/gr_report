@@ -24,7 +24,7 @@ installs
 | `/etc/systemd/system/gr_report.service` | hardened service unit |
 | `/etc/gr_report/gr_report.yaml` | all settings (kept on re-install) |
 | `/etc/gr_report/tls/` | certificate and key, `root:gr_report 0750` |
-| `/var/lib/gr_report/` | data, created by systemd, `gr_report 0700` |
+| `/var/lib/gr_report/` | data, created by systemd, `gr_report 0700`; with `backups/` and `archive/` inside |
 | user and group `gr_report` | unprivileged service account |
 
 Then create a certificate (below) and start the service:
@@ -71,6 +71,11 @@ development:
 | `language` | `en` | Default language, `en` or `sv` | `GR_REPORT_LANG` | `-lang` |
 | `chat.enabled` | `true` | Chat between participants | `GR_REPORT_CHAT` | `-chat` |
 | `chat.oversight` | `false` | Let the exercise leader read chat between groups (the initial state when the switch below is enabled) | `GR_REPORT_CHAT_OVERSIGHT` | `-chat-oversight` |
+| `redirect_http` | – | Plain HTTP address that only redirects to HTTPS, e.g. `:8080` | `GR_REPORT_REDIRECT_HTTP` | `-redirect-http` |
+| `timezone` | `UTC` | Time zone for users who have not chosen one | `GR_REPORT_TIMEZONE` | `-timezone` |
+| `backup.interval` | `0` (off) | Automatic backup every so often, e.g. `1h` | `GR_REPORT_BACKUP_INTERVAL` | `-backup-interval` |
+| `backup.keep` | `10` | Automatic backups to keep | `GR_REPORT_BACKUP_KEEP` | `-backup-keep` |
+| – | – | Copy the database to a file and exit | – | `-backup FILE` |
 | `chat.oversight_toggle` | `true` | Let the exercise leader switch oversight on and off on the chat page | `GR_REPORT_CHAT_OVERSIGHT_TOGGLE` | `-chat-oversight-toggle` |
 | `sandbox` | `auto` | `auto`, `strict` or `off` | `GR_REPORT_SANDBOX` | `-sandbox` |
 | `development.insecure_http` | `false` | Plain HTTP, development only | `GR_REPORT_INSECURE_HTTP` | `-insecure-http` |
@@ -139,6 +144,27 @@ every look by a leader is logged as `event=chat_oversight_view` (with
 
 Tell the participants in the exercise instructions whether oversight is
 used.
+
+### Redirecting HTTP to HTTPS
+
+People type a host name without `https://`. With
+
+```yaml
+redirect_http: ":8080"
+```
+
+the server also listens for plain HTTP on that address and answers every
+request with a permanent redirect to the same host and path on the HTTPS
+port. Nothing else is served there. To use port 80, install the low-port
+drop-in (see *Running on a different port*) and open the port in the
+firewall. The example file ships with it switched off.
+
+### Time zone
+
+`timezone` is the zone times are shown in for users who have not chosen
+their own under Settings – set it to the zone of the exercise, for example
+`Europe/Stockholm`. Times are always stored in UTC, and the system log
+stays in UTC. The time zone database is built into the program.
 
 ### Language
 
@@ -282,37 +308,83 @@ rates the unit (expected: about 1.1, "OK").
 All state is the SQLite database `/var/lib/gr_report/gr_report.db`. While
 the service runs there are also `gr_report.db-wal` and `gr_report.db-shm`
 next to it; recent changes live in the `-wal` file, so **do not copy only
-the `.db` file of a running server**.
+the `.db` file of a running server**. Use one of the following instead;
+each writes a complete, consistent copy while the service keeps running.
 
-Online backup, consistent and without stopping the service (needs the
-`sqlite3` command line tool):
-
-```bash
-sudo sqlite3 /var/lib/gr_report/gr_report.db ".backup '/backup/gr_report-$(date +%F).db'"
-```
-
-Or stop the service and copy the file:
+| How | Where the copy goes |
+| --- | --- |
+| Automatically, every `backup.interval` (the shipped file says `1h`, keeping 24) | `/var/lib/gr_report/backups/auto-<UTC time>.db`; older ones beyond `backup.keep` are removed |
+| An administrator presses **Backup → Make a backup now** | `/var/lib/gr_report/backups/manual-<UTC time>.db`; never removed automatically |
+| From the command line | wherever you say |
 
 ```bash
-sudo systemctl stop gr_report && sudo cp /var/lib/gr_report/gr_report.db /backup/ && sudo systemctl start gr_report
+sudo -u gr_report gr_report -config /etc/gr_report/gr_report.yaml -backup /var/lib/gr_report/backups/before-upgrade.db
 ```
 
-Restore: stop the service, remove `gr_report.db-wal` and
+The command needs read access to the data directory and write access to
+the destination, and refuses to overwrite a file.
+
+**The backups folder is on the same disk as the database.** It protects
+against mistakes and a damaged database, not against losing the machine.
+Copy the files elsewhere regularly, for example:
+
+```bash
+sudo rsync -a /var/lib/gr_report/backups/ backuphost:/srv/gr_report-backups/
+```
+
+Backups cannot be downloaded through the web interface, on purpose: they
+contain password hashes, every report and every chat conversation.
+
+**Restore:** stop the service, remove `gr_report.db-wal` and
 `gr_report.db-shm`, put the backup in place as `gr_report.db` (owner
-`gr_report`, mode `0600`), start the service.
+`gr_report`, mode `0600`), start the service:
 
-The database contains password hashes and all chat conversations – treat
-backups as sensitive. It can
-be inspected with `sqlite3`, for example:
+```bash
+sudo systemctl stop gr_report
+```
+
+```bash
+sudo rm -f /var/lib/gr_report/gr_report.db-wal /var/lib/gr_report/gr_report.db-shm && sudo install -o gr_report -g gr_report -m 0600 /var/lib/gr_report/backups/auto-20261117-120000.db /var/lib/gr_report/gr_report.db
+```
+
+```bash
+sudo systemctl start gr_report
+```
+
+The database can be inspected with `sqlite3`, for example:
 
 ```bash
 sudo sqlite3 -readonly /var/lib/gr_report/gr_report.db "SELECT status, COUNT(*) FROM reports GROUP BY status"
 ```
 
-To start a fresh exercise, stop the service and remove the content of the
-data directory; the next start creates a new administrator password.
+## Starting a new exercise
+
+An exercise leader or an administrator starts a new exercise under
+**Exercise** in the web interface. That writes
+`/var/lib/gr_report/archive/<UTC time>-<name>.db` – the whole database as
+it was – and then removes reports, requests, chat, drafts and read
+markers. Accounts, templates, saved filters, settings and the audit log
+are kept. If the archive cannot be written, nothing is removed.
+
+Archives are never deleted by the program; remove old ones yourself. To
+look at an archived exercise, run a second instance on a copy of it:
+
+```bash
+mkdir /tmp/old-exercise && cp /var/lib/gr_report/archive/20261117-160000-spring-drill.db /tmp/old-exercise/gr_report.db
+```
+
+```bash
+gr_report -data /tmp/old-exercise -insecure-http -addr 127.0.0.1:8081
+```
+
+To wipe everything including accounts, stop the service and remove the
+content of the data directory; the next start creates a new administrator
+password.
 
 ## Logs
+
+The same audit events can be read by administrators in the web interface
+under **Audit log** (the newest 100 000 are kept in the database).
 
 The service logs to the journal. Lines with `msg=audit` record logins,
 failed logins, account changes, sent reports and queue actions with user
@@ -345,6 +417,8 @@ downgraded.
 | `data directory is in use by another process` | A second instance uses the same `-data` directory |
 | `schema version … is newer than this program supports` | The database was used with a newer gr_report; install that version or restore an older backup |
 | `configuration file: … line 2: field lissten not found …` | A misspelt or unknown setting in `gr_report.yaml`; the message gives the line and the name |
+| `listen (HTTP redirect): … permission denied` | `redirect_http` names a port below 1024 without the low-port drop-in |
+| `unknown time zone` | `timezone` is not an IANA name such as `Europe/Stockholm` |
 | `sandbox could not be fully applied` | `strict` on a kernel without Landlock network support (< 6.7); use `auto` |
 | `listen … permission denied` | Port below 1024 without the drop-in, or SELinux port label missing |
 | Lost the only administrator password | See below |

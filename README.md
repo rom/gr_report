@@ -11,6 +11,14 @@ of people report to an exercise leader.
   attached for the answer.
 * The **administrator** or the exercise leader creates report templates. The
   administrator manages the accounts.
+* Groups can have **personal accounts** for their members; reports can be
+  saved as **drafts**, requests can have **deadlines**, lists can be
+  **exported** as CSV, and times are shown in each user's **time zone**.
+* The leader's queue updates live, with per-person read state, assignment
+  to a leader, saved filters and optional desktop or sound notifications.
+* Administrators can create accounts in bulk, read the **audit log**, make
+  **backups**, and start a **new exercise** (archive and reset) from the
+  interface.
 * Groups and the exercise leader can **chat**: one conversation for
   everyone, and direct conversations between two groups or between a group
   and the exercise leader.

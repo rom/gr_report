@@ -1,6 +1,6 @@
 # 0004 – Three roles, one shared account per group, one shared leader queue
 
-* Status: Accepted
+* Status: Accepted; amended by [0020](0020-personal-accounts.md) (personal accounts) and [0021](0021-read-state-and-assignment.md) (read state per person)
 * Date: 2026-11-16
 * ASRs: F-1, F-4, F-5, F-6, Q-1
 

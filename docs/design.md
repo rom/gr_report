@@ -52,6 +52,7 @@ pure-Go driver ([ADR 0012](adr/0012-sqlite-storage.md)).
 | `reports` | `ts` (Unix nanoseconds), sender and receiver IDs and names, `fields` (JSON array of key/label/value), `request_id`, `status`, `folder`, `search_text` |
 | `chat_messages` (migration 2; `overseen` added by migration 3) | `seq` (autoincrement, the cursor), `conv`, `party_a`, `party_b`, sender party and name, `body`, `overseen` |
 | `chat_read` (migration 2) | primary key (`party`, `conv`), `seq` last seen |
+| migration 5 | `users.group_id`; `requests.due`; `reports.author_id`, `author_name`, `assignee_id`, `assignee_name`; tables `report_seen` (user, report), `drafts` (one per user, template and request), `saved_filters`, `audit` |
 | `settings` (migration 4) | `key`, `value`, `updated_by`, `updated_at`: settings changed in the user interface (today only `chat_oversight`) |
 
 Indexes on `reports(receiver_id, sender_id, status)`, `reports(sender_id)`
@@ -146,6 +147,15 @@ handler → html/template → response
 | `GET /chat`, `GET /chat/{peer}` | group, leader | Conversation list and messages; `peer` is `all`, `leader` or a group ID |
 | `POST /chat/{peer}` | group, leader | Send a message |
 | `GET /api/chat/{peer}?after=seq` | group, leader | New messages as JSON; marks them read |
+| `GET /queue/export.csv`, `GET /sent/export.csv` | group, leader / group | The filtered list as CSV |
+| `POST /queue/filters`, `POST /queue/filters/{id}/delete` | group, leader | Saved filters |
+| `POST /reports/{id}/assign` | leader | Assign a report in the leader queue |
+| `POST /drafts/{id}/delete` | group | Delete an own draft (saving is `POST /reports` with `action=draft`) |
+| `POST /requests/{id}/due` | leader | Set, move or remove a deadline |
+| `GET,POST /admin/users/import` | admin | Create several accounts |
+| `GET /admin/audit` | admin | Audit log |
+| `GET,POST /admin/backup` | admin | List and make backups |
+| `GET /exercise`, `POST /exercise/reset` | leader, admin | Archive and start a new exercise |
 | `POST /chat/oversight` | leader | The oversight switch (`oversight=on` or `off`), if enabled |
 | `GET /chat/oversight/{a}/{b}` | leader | With oversight on: read-only view of the overseen messages between groups `a` and `b` |
 | `GET /api/chat/oversight/{a}/{b}?after=seq` | leader | New overseen messages as JSON for that view; marks nothing read |
@@ -165,6 +175,21 @@ handler → html/template → response
   non-group account.
 * Queue actions only touch reports whose receiver is the acting user's
   queue; IDs of other reports in a bulk request are silently skipped.
+* **Party.** `reqCtx.party` is `User.Party()`: the group for a group
+  account and its members, `leader` for leaders. Every query that used to
+  compare with the user's ID as a group now uses the party; the user's own
+  ID is used for what is personal (seen markers, drafts, saved filters,
+  authorship).
+* **Seen vs. status.** Opening a report in one's queue records
+  `report_seen` for the user and moves the shared status from new to read.
+  Queue queries compute `Unseen` for the viewer in SQL.
+* **Time.** `reqCtx.loc` is the viewer's zone; templates format with
+  `$.TS`, handlers with `c.ts`. Date filters and deadlines are parsed in
+  that zone.
+* **Export** reuses `queueRows`, the same function that feeds the queue
+  page, so page and file cannot disagree.
+* **Reset** is `CopyTo(archive)` followed by `ResetExercise()`; the second
+  is not attempted if the first fails.
 * A chat conversation is resolved from the user's own party and the peer
   in the path; peers that are the user itself, not a group, or unknown give
   404. Viewing the newest page or polling marks the conversation read;
@@ -204,7 +229,9 @@ script; no external resources.
   `aria-current`, errors as `role="alert"` linked to the form by
   `aria-describedby`, visible focus, no information by colour alone.
 * **Script** (`static/app.js`, optional): new-report notice and unread
-  chat counter by polling, live chat messages, select-all, add-field row,
+  chat counter by polling, live chat messages, live queue (re-fetch and
+  swap by element ID), background saving of drafts, desktop and sound
+  notifications, time zone detection, print, select-all, add-field row,
   theme preview. Elements that need it are
   rendered `hidden` with `data-js-show`. It never writes HTML.
 * Without the script, the optional `<meta http-equiv="refresh">` on the
