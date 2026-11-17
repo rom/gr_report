@@ -5,13 +5,29 @@
 {{if not $v.Sent}}
 <aside class="panel" aria-labelledby="h-queues">
   <h2 id="h-queues" class="sr-only">{{$.T "Queues"}}</h2>
-  <ul class="queues">
+  <ul class="queues" id="queue-list">
   {{range $v.Queues}}
     <li><a href="{{.URL}}"{{if .Active}} class="active" aria-current="true"{{end}}><span>{{.Name}}</span>
-      <span class="count">{{if .New}}<span class="badge">{{.New}}</span><span class="sr-only"> {{$.T "new reports"}},</span> {{end}}{{.Total}}<span class="sr-only"> {{$.T "in total"}}</span></span></a></li>
+      <span class="count">{{if .New}}<span class="badge">{{.New}}</span><span class="sr-only"> {{$.T "unread"}},</span> {{end}}{{.Total}}<span class="sr-only"> {{$.T "in total"}}</span></span></a></li>
   {{end}}
   </ul>
-  <p class="help">{{$.T "One queue per group. The badge counts new reports."}}</p>
+  <p class="help">{{$.T "One queue per group. The badge counts reports you have not opened."}}</p>
+  <h2 id="h-saved">{{$.T "Saved filters"}}</h2>
+  {{if $v.Saved}}
+  <ul class="saved" aria-labelledby="h-saved">
+  {{range $v.Saved}}
+    <li><a href="{{.URL}}">{{.Name}}</a>
+      <form class="inlineform" method="post" action="/queue/filters/{{.ID}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="link" aria-label="{{$.T "Delete filter: %s" .Name}}">{{$.T "Delete"}}</button></form></li>
+  {{end}}
+  </ul>
+  {{else}}<p class="help">{{$.T "Set a filter, then save it here to get back to it with one click."}}</p>{{end}}
+  <form method="post" action="/queue/filters">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <input type="hidden" name="return" value="{{$v.Return}}">
+    <label for="filter-name">{{$.T "Save the current view as"}}</label>
+    <input type="text" id="filter-name" name="name" maxlength="60" required>
+    <div class="actions"><button class="plain">{{$.T "Save filter"}}</button></div>
+  </form>
 </aside>
 {{end}}
 <div>
@@ -43,8 +59,17 @@
     {{range $v.Requests}}<option value="{{.ID}}"{{if eq .ID $p.Request}} selected{{end}}>{{.Subject}}</option>{{end}}
   </select></div>
   {{end}}
+  {{if $v.Leader}}
+  <div><label for="assignee">{{$.T "Assigned to"}}</label><select id="assignee" name="assignee">
+    <option value="">{{$.T "anyone"}}</option>
+    <option value="me"{{if eq $p.Assignee "me"}} selected{{end}}>{{$.T "me"}}</option>
+    <option value="none"{{if eq $p.Assignee "none"}} selected{{end}}>{{$.T "nobody"}}</option>
+    {{range $v.Leaders}}{{if ne .ID $.User.ID}}<option value="{{.ID}}"{{if eq .ID $p.Assignee}} selected{{end}}>{{.DisplayName}}</option>{{end}}{{end}}
+  </select></div>
+  {{end}}
   <div><label for="from">{{$.T "From date"}}</label><input type="date" id="from" name="from" value="{{$p.From}}"></div>
   <div><label for="to">{{$.T "To date"}}</label><input type="date" id="to" name="to" value="{{$p.To}}"></div>
+  {{if not $v.Sent}}<div><label class="inline" for="unread"><input type="checkbox" id="unread" name="unread" value="1"{{if $p.Unread}} checked{{end}}> {{$.T "Only unread"}}</label></div>{{end}}
   <div class="actions"><button>{{$.T "Filter"}}</button>{{if $v.Filtered}} <a href="{{$v.Base}}{{if $p.Group}}?group={{$p.Group}}{{end}}">{{$.T "Clear filter"}}</a>{{end}}</div>
 </form>
 
@@ -59,6 +84,8 @@
     <option value="read">{{$.T "mark as read"}}</option>
     <option value="new">{{$.T "mark as new"}}</option>
     <option value="file">{{$.T "file in folder"}}</option>
+    {{if $v.Leader}}<option value="assign_me">{{$.T "assign to me"}}</option>
+    <option value="unassign">{{$.T "remove assignment"}}</option>{{end}}
   </select>
   <input type="text" name="folder" maxlength="60" list="folders" placeholder="{{$.T "folder name"}}" aria-label="{{$.T "Folder name"}}">
   <datalist id="folders">{{range $v.Folders}}<option value="{{.}}">{{end}}</datalist>
@@ -66,28 +93,32 @@
   <a href="{{$v.AutoURL}}">{{if $p.Auto}}{{$.T "Auto-refresh: on"}}{{else}}{{$.T "Auto-refresh: off"}}{{end}}</a>
 </div>
 {{end}}
-<p class="muted" role="status">{{if $v.Total}}{{$.T "%d–%d of %d" $v.First $v.Last $v.Total}}{{else}}{{$.T "0 reports"}}{{end}}</p>
-<div class="scroll"><table aria-labelledby="h-queue">
+<p class="muted"><span role="status" id="queue-status">{{if $v.Total}}{{$.T "%d–%d of %d" $v.First $v.Last $v.Total}}{{else}}{{$.T "0 reports"}}{{end}}</span>
+  · <a href="{{$v.ExportURL}}">{{$.T "Export this list (CSV)"}}</a>
+  <span class="help">· {{$.T "Times in %s" $.Zone}}</span></p>
+<div class="scroll"><table aria-labelledby="h-queue"{{if not $p.Page}} data-live="queue"{{end}}>
   <thead><tr>
     {{if not $v.Sent}}<th scope="col"><label class="inline" data-js-show hidden><input type="checkbox" id="select-all"> <span class="sr-only">{{$.T "Select all reports on this page"}}</span></label><span class="sr-only">{{$.T "Select"}}</span></th>{{end}}
     {{range $v.Sorts}}<th scope="col" aria-sort="{{.Aria}}"><a href="{{.URL}}">{{.Label}}{{if .Arrow}} <span aria-hidden="true">{{.Arrow}}</span>{{end}}</a></th>{{end}}
     {{if $v.Sent}}<th scope="col">{{$.T "To"}}</th>{{end}}
+    {{if $v.Leader}}<th scope="col">{{$.T "Assigned to"}}</th>{{end}}
     <th scope="col">{{$.T "Template"}}</th>
   </tr></thead>
-  <tbody>
+  <tbody id="queue-body">
   {{range $v.Rows}}
-  <tr{{if eq .Status "new"}} class="new"{{end}}>
+  <tr{{if .Unseen}} class="new"{{end}}>
     {{if not $v.Sent}}<td><input type="checkbox" name="id" value="{{.ID}}" aria-label="{{$.T "Select: %s" .Subject}}"></td>{{end}}
-    <td>{{ts .Timestamp}}</td>
-    <td><a href="/reports/{{.ID}}">{{.Subject}}</a></td>
-    <td>{{.SenderName}}</td>
+    <td>{{$.TS .Timestamp}}</td>
+    <td>{{if and .Unseen (not $v.Sent)}}<span class="unread" aria-hidden="true">●</span><span class="sr-only">{{$.T "unread"}}: </span>{{end}}<a href="/reports/{{.ID}}">{{.Subject}}</a></td>
+    <td>{{.SenderName}}{{if .AuthorName}} <span class="muted">({{.AuthorName}})</span>{{end}}</td>
     <td><span class="tag {{.Status}}">{{$.Tr .Status}}</span></td>
     <td>{{.Folder}}</td>
     {{if $v.Sent}}<td>{{if eq .ReceiverID "leader"}}{{$.T "Exercise leader"}}{{else}}{{.ReceiverName}}{{end}}</td>{{end}}
+    {{if $v.Leader}}<td>{{.AssigneeName}}</td>{{end}}
     <td>{{.TemplateName}}</td>
   </tr>
   {{else}}
-  <tr><td colspan="8" class="muted">{{if $v.Filtered}}{{$.T "No reports match the filter."}}{{else}}{{$.T "No reports."}}{{end}}</td></tr>
+  <tr><td colspan="9" class="muted">{{if $v.Filtered}}{{$.T "No reports match the filter."}}{{else}}{{$.T "No reports."}}{{end}}</td></tr>
   {{end}}
   </tbody>
 </table></div>

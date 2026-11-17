@@ -28,9 +28,20 @@ type ReportFilter struct {
 	Folder     string
 	Query      string // white-space separated terms, all must match
 	From, To   time.Time
+	// AssigneeID selects reports assigned to a leader; AssigneeNone
+	// selects those assigned to nobody.
+	AssigneeID string
+	// ViewerID is the user for whom Report.Unseen is computed. With
+	// UnseenOnly, only reports that user has not opened are selected.
+	// Both are applied by the store, not by Match.
+	ViewerID   string
+	UnseenOnly bool
 
 	terms []string
 }
+
+// AssigneeNone as ReportFilter.AssigneeID selects unassigned reports.
+const AssigneeNone = "-"
 
 // MaxQueryTerms bounds the work a single search can cause.
 const MaxQueryTerms = 10
@@ -54,6 +65,8 @@ func (f *ReportFilter) Match(r *Report) bool {
 		f.TemplateID != "" && r.TemplateID != f.TemplateID,
 		f.RequestID != "" && r.RequestID != f.RequestID,
 		f.Folder != "" && r.Folder != f.Folder,
+		f.AssigneeID == AssigneeNone && r.AssigneeID != "",
+		f.AssigneeID != "" && f.AssigneeID != AssigneeNone && r.AssigneeID != f.AssigneeID,
 		!f.From.IsZero() && r.Timestamp.Before(f.From),
 		!f.To.IsZero() && !r.Timestamp.Before(f.To):
 		return false
@@ -61,9 +74,10 @@ func (f *ReportFilter) Match(r *Report) bool {
 	if len(f.terms) == 0 {
 		return true
 	}
-	hay := make([]string, 0, 5+len(r.Fields))
+	hay := make([]string, 0, 6+len(r.Fields))
 	hay = append(hay, strings.ToLower(r.Subject), strings.ToLower(r.Content),
-		strings.ToLower(r.SenderName), strings.ToLower(r.TemplateName), strings.ToLower(r.Folder))
+		strings.ToLower(r.SenderName), strings.ToLower(r.TemplateName), strings.ToLower(r.Folder),
+		strings.ToLower(r.AuthorName))
 	for _, fv := range r.Fields {
 		hay = append(hay, strings.ToLower(fv.Value))
 	}

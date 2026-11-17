@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -44,6 +45,10 @@ func (f *Failure) Unwrap() error { return f.Err }
 const (
 	DBName   = "gr_report.db"
 	lockName = "lock"
+	// BackupDir and ArchiveDir are subdirectories of the data directory
+	// for copies of the database.
+	BackupDir  = "backups"
+	ArchiveDir = "archive"
 )
 
 // migrations are applied in order; the index+1 is stored in user_version.
@@ -127,12 +132,57 @@ CREATE TABLE settings (
 	updated_by TEXT NOT NULL,
 	updated_at INTEGER NOT NULL
 ) STRICT;
+`, `
+ALTER TABLE users    ADD COLUMN group_id      TEXT NOT NULL DEFAULT '';
+ALTER TABLE requests ADD COLUMN due           INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE reports  ADD COLUMN author_id     TEXT NOT NULL DEFAULT '';
+ALTER TABLE reports  ADD COLUMN author_name   TEXT NOT NULL DEFAULT '';
+ALTER TABLE reports  ADD COLUMN assignee_id   TEXT NOT NULL DEFAULT '';
+ALTER TABLE reports  ADD COLUMN assignee_name TEXT NOT NULL DEFAULT '';
+CREATE TABLE report_seen (
+	user_id   TEXT NOT NULL,
+	report_id TEXT NOT NULL,
+	PRIMARY KEY (user_id, report_id)
+) STRICT, WITHOUT ROWID;
+-- Everything that had been opened counts as seen by everyone, so an
+-- upgrade does not turn the whole history unread.
+INSERT INTO report_seen (user_id, report_id)
+	SELECT u.id, r.id FROM users u, reports r WHERE r.status <> 'new';
+CREATE TABLE drafts (
+	id          TEXT PRIMARY KEY,
+	user_id     TEXT NOT NULL,
+	template_id TEXT NOT NULL,
+	request_id  TEXT NOT NULL,
+	receiver    TEXT NOT NULL,
+	subject     TEXT NOT NULL,
+	content     TEXT NOT NULL,
+	fields      TEXT NOT NULL,
+	updated     INTEGER NOT NULL,
+	UNIQUE (user_id, template_id, request_id)
+) STRICT;
+CREATE TABLE saved_filters (
+	id      TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL,
+	name    TEXT NOT NULL,
+	query   TEXT NOT NULL
+) STRICT;
+CREATE INDEX saved_filters_user ON saved_filters (user_id);
+CREATE TABLE audit (
+	seq    INTEGER PRIMARY KEY AUTOINCREMENT,
+	ts     INTEGER NOT NULL,
+	user   TEXT NOT NULL,
+	role   TEXT NOT NULL,
+	ip     TEXT NOT NULL,
+	event  TEXT NOT NULL,
+	detail TEXT NOT NULL
+) STRICT;
 `}
 
 // Store is safe for concurrent use.
 type Store struct {
 	db   *sql.DB
 	lock *os.File
+	dir  string
 }
 
 // Open opens (or creates) the database in dir and brings its schema up to
@@ -140,6 +190,12 @@ type Store struct {
 func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
+	}
+	// Created now because the sandbox later forbids making directories.
+	for _, sub := range []string{BackupDir, ArchiveDir} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o700); err != nil {
+			return nil, err
+		}
 	}
 	lock, err := os.OpenFile(filepath.Join(dir, lockName), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -176,7 +232,7 @@ func Open(dir string) (*Store, error) {
 	// One connection: SQLite has a single writer anyway, and it keeps the
 	// semantics simple (no SQLITE_BUSY between our own goroutines).
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db, lock: lock}
+	s := &Store{db: db, lock: lock, dir: dir}
 	if err := s.migrate(); err != nil {
 		s.Close()
 		return nil, fmt.Errorf("database %s: %w", path, err)
@@ -292,12 +348,12 @@ func fromUnix(n int64) time.Time {
 
 // ---- users ----
 
-const userCols = "id, username, display_name, role, pass_hash, disabled, must_change, created"
+const userCols = "id, username, display_name, role, pass_hash, disabled, must_change, created, group_id"
 
 func scanUser(sc interface{ Scan(...any) error }) (model.User, error) {
 	var u model.User
 	var created int64
-	err := sc.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role, &u.PassHash, &u.Disabled, &u.MustChange, &created)
+	err := sc.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role, &u.PassHash, &u.Disabled, &u.MustChange, &created, &u.GroupID)
 	u.Created = fromUnix(created)
 	return u, err
 }
@@ -307,11 +363,11 @@ func (s *Store) PutUser(u model.User) error {
 	if !model.ValidID(u.ID) || u.Username == "" {
 		return errors.New("invalid user")
 	}
-	err := s.exec(`INSERT INTO users (`+userCols+`) VALUES (?,?,?,?,?,?,?,?)
+	err := s.exec(`INSERT INTO users (`+userCols+`) VALUES (?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(id) DO UPDATE SET username=excluded.username, display_name=excluded.display_name,
 		role=excluded.role, pass_hash=excluded.pass_hash, disabled=excluded.disabled,
-		must_change=excluded.must_change, created=excluded.created`,
-		u.ID, u.Username, u.DisplayName, string(u.Role), u.PassHash, b2i(u.Disabled), b2i(u.MustChange), unix(u.Created))
+		must_change=excluded.must_change, created=excluded.created, group_id=excluded.group_id`,
+		u.ID, u.Username, u.DisplayName, string(u.Role), u.PassHash, b2i(u.Disabled), b2i(u.MustChange), unix(u.Created), u.GroupID)
 	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed: users.username") {
 		return ErrDuplicate
 	}
@@ -361,11 +417,12 @@ func (s *Store) Users() []model.User {
 	return out
 }
 
-// Groups returns all enabled accounts with the group role.
+// Groups returns the enabled groups: the group accounts themselves, not
+// the personal accounts of their members.
 func (s *Store) Groups() []model.User {
 	var out []model.User
 	for _, u := range s.Users() {
-		if u.Role == model.RoleGroup && !u.Disabled {
+		if u.Role == model.RoleGroup && !u.Disabled && u.GroupID == "" {
 			out = append(out, u)
 		}
 	}
@@ -436,16 +493,16 @@ func (s *Store) Templates(all bool) []model.Template {
 
 // ---- requests ----
 
-const requestCols = "id, subject, body, template_id, recipients, created_by, created, closed"
+const requestCols = "id, subject, body, template_id, recipients, created_by, created, closed, due"
 
 func scanRequest(sc interface{ Scan(...any) error }) (model.Request, error) {
 	var q model.Request
 	var recipients string
-	var created int64
-	if err := sc.Scan(&q.ID, &q.Subject, &q.Body, &q.TemplateID, &recipients, &q.CreatedBy, &created, &q.Closed); err != nil {
+	var created, due int64
+	if err := sc.Scan(&q.ID, &q.Subject, &q.Body, &q.TemplateID, &recipients, &q.CreatedBy, &created, &q.Closed, &due); err != nil {
 		return q, err
 	}
-	q.Created = fromUnix(created)
+	q.Created, q.Due = fromUnix(created), fromUnix(due)
 	return q, json.Unmarshal([]byte(recipients), &q.Recipients)
 }
 
@@ -454,8 +511,8 @@ func (s *Store) PutRequest(q model.Request) error {
 	if !model.ValidID(q.ID) {
 		return errors.New("invalid request")
 	}
-	return s.exec(`INSERT OR REPLACE INTO requests (`+requestCols+`) VALUES (?,?,?,?,?,?,?,?)`,
-		q.ID, q.Subject, q.Body, q.TemplateID, toJSON(q.Recipients), q.CreatedBy, unix(q.Created), b2i(q.Closed))
+	return s.exec(`INSERT OR REPLACE INTO requests (`+requestCols+`) VALUES (?,?,?,?,?,?,?,?,?)`,
+		q.ID, q.Subject, q.Body, q.TemplateID, toJSON(q.Recipients), q.CreatedBy, unix(q.Created), b2i(q.Closed), unix(q.Due))
 }
 
 // Request returns the request with the given ID.
@@ -487,14 +544,21 @@ func (s *Store) Requests() []model.Request {
 // ---- reports ----
 
 const reportCols = "id, ts, sender_id, sender_name, subject, content, receiver_id, receiver_name, " +
-	"template_id, template_name, fields, request_id, status, folder"
+	"template_id, template_name, fields, request_id, status, folder, author_id, author_name, assignee_id, assignee_name"
 
-func scanReport(sc interface{ Scan(...any) error }) (model.Report, error) {
+// seenExpr counts whether a given user (one bound parameter) has opened the
+// report of the current row.
+const seenExpr = "(SELECT COUNT(*) FROM report_seen s WHERE s.user_id = ? AND s.report_id = reports.id)"
+
+// scanReport scans reportCols, plus further columns into extra.
+func scanReport(sc interface{ Scan(...any) error }, extra ...any) (model.Report, error) {
 	var r model.Report
 	var fields string
 	var ts int64
-	if err := sc.Scan(&r.ID, &ts, &r.SenderID, &r.SenderName, &r.Subject, &r.Content, &r.ReceiverID, &r.ReceiverName,
-		&r.TemplateID, &r.TemplateName, &fields, &r.RequestID, &r.Status, &r.Folder); err != nil {
+	dest := append([]any{&r.ID, &ts, &r.SenderID, &r.SenderName, &r.Subject, &r.Content, &r.ReceiverID, &r.ReceiverName,
+		&r.TemplateID, &r.TemplateName, &fields, &r.RequestID, &r.Status, &r.Folder,
+		&r.AuthorID, &r.AuthorName, &r.AssigneeID, &r.AssigneeName}, extra...)
+	if err := sc.Scan(dest...); err != nil {
 		return r, err
 	}
 	r.Timestamp = fromUnix(ts)
@@ -504,18 +568,19 @@ func scanReport(sc interface{ Scan(...any) error }) (model.Report, error) {
 // searchText is the lower-cased haystack for full text search. Lower-casing
 // happens in Go because SQLite only folds ASCII (Å, Ä and Ö matter here).
 func searchText(r *model.Report) string {
-	parts := []string{r.Subject, r.Content, r.SenderName, r.TemplateName, r.Folder}
+	parts := []string{r.Subject, r.Content, r.SenderName, r.TemplateName, r.Folder, r.AuthorName}
 	for _, f := range r.Fields {
 		parts = append(parts, f.Value)
 	}
 	return strings.ToLower(strings.Join(parts, "\n"))
 }
 
-const putReportSQL = `INSERT OR REPLACE INTO reports (` + reportCols + `, search_text) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+const putReportSQL = `INSERT OR REPLACE INTO reports (` + reportCols + `, search_text) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
 
 func reportArgs(r *model.Report) []any {
 	return []any{r.ID, unix(r.Timestamp), r.SenderID, r.SenderName, r.Subject, r.Content, r.ReceiverID, r.ReceiverName,
-		r.TemplateID, r.TemplateName, toJSON(r.Fields), r.RequestID, string(r.Status), r.Folder, searchText(r)}
+		r.TemplateID, r.TemplateName, toJSON(r.Fields), r.RequestID, string(r.Status), r.Folder,
+		r.AuthorID, r.AuthorName, r.AssigneeID, r.AssigneeName, searchText(r)}
 }
 
 // PutReport stores a report.
@@ -536,6 +601,17 @@ func (s *Store) Report(id string) (model.Report, bool) {
 	}
 	must(err)
 	return r, true
+}
+
+// Members returns the personal accounts that belong to a group.
+func (s *Store) Members(groupID string) []model.User {
+	var out []model.User
+	for _, u := range s.Users() {
+		if u.GroupID == groupID && groupID != "" {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // UpdateReport modifies a report in one transaction. If fn returns false
@@ -601,17 +677,34 @@ func (s *Store) Reports(f *model.ReportFilter) []model.Report {
 			where = append(where, `search_text LIKE ? ESCAPE '\'`)
 			args = append(args, "%"+likeEscape.Replace(term)+"%")
 		}
+		switch f.AssigneeID {
+		case "":
+		case model.AssigneeNone:
+			where = append(where, "assignee_id = ''")
+		default:
+			eq("assignee_id", f.AssigneeID)
+		}
+		if f.UnseenOnly && f.ViewerID != "" {
+			where = append(where, seenExpr+" = 0")
+			args = append(args, f.ViewerID)
+		}
 	}
-	q := "SELECT " + reportCols + " FROM reports"
+	viewer := ""
+	if f != nil {
+		viewer = f.ViewerID
+	}
+	q := "SELECT " + reportCols + ", " + seenExpr + " FROM reports"
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
-	rows := s.query(q, args...)
+	rows := s.query(q, append([]any{viewer}, args...)...)
 	defer rows.Close()
 	var out []model.Report
 	for rows.Next() {
-		r, err := scanReport(rows)
+		var seen int
+		r, err := scanReport(rows, &seen)
 		must(err)
+		r.Unseen = viewer != "" && seen == 0
 		out = append(out, r)
 	}
 	must(rows.Err())
@@ -625,18 +718,19 @@ type QueueStats struct {
 	Folders []string       // distinct folder names, sorted
 }
 
-// Stats computes per-sender counters and the folder list for a receiver.
-func (s *Store) Stats(receiverID string) QueueStats {
+// Stats computes, for a receiver's queue, the totals per sender, the number
+// of reports the viewer has not opened per sender, and the folder list.
+func (s *Store) Stats(receiverID, viewerID string) QueueStats {
 	st := QueueStats{Total: map[string]int{}, New: map[string]int{}}
-	rows := s.query(`SELECT sender_id, COUNT(*), COALESCE(SUM(status = 'new'), 0)
-		FROM reports WHERE receiver_id = ? GROUP BY sender_id`, receiverID)
+	rows := s.query(`SELECT sender_id, COUNT(*), COALESCE(SUM(`+seenExpr+` = 0), 0)
+		FROM reports WHERE receiver_id = ? GROUP BY sender_id`, viewerID, receiverID)
 	for rows.Next() {
 		var sender string
-		var total, unread int
-		must(rows.Scan(&sender, &total, &unread))
+		var total, unseen int
+		must(rows.Scan(&sender, &total, &unseen))
 		st.Total[sender] = total
-		if unread > 0 {
-			st.New[sender] = unread
+		if unseen > 0 {
+			st.New[sender] = unseen
 		}
 	}
 	must(rows.Err())
@@ -653,13 +747,23 @@ func (s *Store) Stats(receiverID string) QueueStats {
 	return st
 }
 
-// NewCount returns the number of new reports in a receiver's queue.
-func (s *Store) NewCount(receiverID string) int {
+// NewCount returns the number of reports in a receiver's queue that the
+// viewer has not opened.
+func (s *Store) NewCount(receiverID, viewerID string) int {
 	db, err := s.conn()
 	must(err)
 	var n int
-	must(db.QueryRow(`SELECT COUNT(*) FROM reports WHERE receiver_id = ? AND status = 'new'`, receiverID).Scan(&n))
+	must(db.QueryRow(`SELECT COUNT(*) FROM reports WHERE receiver_id = ? AND `+seenExpr+` = 0`, receiverID, viewerID).Scan(&n))
 	return n
+}
+
+// MarkSeen records that a user has opened a report; with seen false it
+// makes the report unread for that user again.
+func (s *Store) MarkSeen(userID, reportID string, seen bool) error {
+	if seen {
+		return s.exec(`INSERT OR IGNORE INTO report_seen (user_id, report_id) VALUES (?,?)`, userID, reportID)
+	}
+	return s.exec(`DELETE FROM report_seen WHERE user_id = ? AND report_id = ?`, userID, reportID)
 }
 
 // ---- chat ----
@@ -804,4 +908,342 @@ func (s *Store) PutSetting(key string, v Setting) error {
 	}
 	return s.exec(`INSERT OR REPLACE INTO settings (key, value, updated_by, updated_at) VALUES (?,?,?,?)`,
 		key, v.Value, v.UpdatedBy, unix(v.UpdatedAt))
+}
+
+// ---- drafts ----
+
+func scanDraft(sc interface{ Scan(...any) error }) (model.Draft, error) {
+	var d model.Draft
+	var fields string
+	var updated int64
+	if err := sc.Scan(&d.ID, &d.UserID, &d.TemplateID, &d.RequestID, &d.Receiver, &d.Subject, &d.Content, &fields, &updated); err != nil {
+		return d, err
+	}
+	d.Updated = fromUnix(updated)
+	return d, json.Unmarshal([]byte(fields), &d.Values)
+}
+
+const draftCols = "id, user_id, template_id, request_id, receiver, subject, content, fields, updated"
+
+// ErrTooMany is returned when a per-user limit is reached.
+var ErrTooMany = errors.New("limit reached")
+
+// PutDraft saves a draft. A user has one draft per template and request;
+// saving again replaces it and keeps its ID.
+func (s *Store) PutDraft(d model.Draft) (model.Draft, error) {
+	db, err := s.conn()
+	if err != nil {
+		return d, err
+	}
+	if !model.ValidID(d.ID) || d.UserID == "" || d.TemplateID == "" {
+		return d, errors.New("invalid draft")
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return d, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var existing string
+	err = tx.QueryRow(`SELECT id FROM drafts WHERE user_id = ? AND template_id = ? AND request_id = ?`,
+		d.UserID, d.TemplateID, d.RequestID).Scan(&existing)
+	switch {
+	case err == nil:
+		d.ID = existing
+	case errors.Is(err, sql.ErrNoRows):
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM drafts WHERE user_id = ?`, d.UserID).Scan(&n); err != nil {
+			return d, err
+		}
+		if n >= model.MaxDrafts {
+			return d, ErrTooMany
+		}
+	default:
+		return d, err
+	}
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO drafts (`+draftCols+`) VALUES (?,?,?,?,?,?,?,?,?)`,
+		d.ID, d.UserID, d.TemplateID, d.RequestID, d.Receiver, d.Subject, d.Content, toJSON(d.Values), unix(d.Updated)); err != nil {
+		return d, err
+	}
+	return d, tx.Commit()
+}
+
+// Draft returns a user's draft for a template and request, if any.
+func (s *Store) Draft(userID, templateID, requestID string) (model.Draft, bool) {
+	db, err := s.conn()
+	must(err)
+	d, err := scanDraft(db.QueryRow("SELECT "+draftCols+" FROM drafts WHERE user_id = ? AND template_id = ? AND request_id = ?",
+		userID, templateID, requestID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Draft{}, false
+	}
+	must(err)
+	return d, true
+}
+
+// Drafts returns a user's drafts, most recently saved first.
+func (s *Store) Drafts(userID string) []model.Draft {
+	rows := s.query("SELECT "+draftCols+" FROM drafts WHERE user_id = ? ORDER BY updated DESC, id", userID)
+	defer rows.Close()
+	var out []model.Draft
+	for rows.Next() {
+		d, err := scanDraft(rows)
+		must(err)
+		out = append(out, d)
+	}
+	must(rows.Err())
+	return out
+}
+
+// DeleteDraft removes a user's draft. Deleting one that does not exist, or
+// that belongs to someone else, does nothing.
+func (s *Store) DeleteDraft(userID, id string) error {
+	return s.exec(`DELETE FROM drafts WHERE user_id = ? AND id = ?`, userID, id)
+}
+
+// ---- saved filters ----
+
+// PutSavedFilter stores a named queue view for a user.
+func (s *Store) PutSavedFilter(f model.SavedFilter) error {
+	db, err := s.conn()
+	if err != nil {
+		return err
+	}
+	if !model.ValidID(f.ID) || f.UserID == "" || f.Name == "" {
+		return errors.New("invalid saved filter")
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM saved_filters WHERE user_id = ? AND id <> ?`, f.UserID, f.ID).Scan(&n); err != nil {
+		return err
+	}
+	if n >= model.MaxSavedFilters {
+		return ErrTooMany
+	}
+	return s.exec(`INSERT OR REPLACE INTO saved_filters (id, user_id, name, query) VALUES (?,?,?,?)`, f.ID, f.UserID, f.Name, f.Query)
+}
+
+// SavedFilters returns a user's saved filters sorted by name.
+func (s *Store) SavedFilters(userID string) []model.SavedFilter {
+	rows := s.query(`SELECT id, user_id, name, query FROM saved_filters WHERE user_id = ?`, userID)
+	defer rows.Close()
+	var out []model.SavedFilter
+	for rows.Next() {
+		var f model.SavedFilter
+		must(rows.Scan(&f.ID, &f.UserID, &f.Name, &f.Query))
+		out = append(out, f)
+	}
+	must(rows.Err())
+	sort.Slice(out, func(i, j int) bool {
+		a, b := strings.ToLower(out[i].Name), strings.ToLower(out[j].Name)
+		if a != b {
+			return a < b
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+// DeleteSavedFilter removes one of a user's saved filters.
+func (s *Store) DeleteSavedFilter(userID, id string) error {
+	return s.exec(`DELETE FROM saved_filters WHERE user_id = ? AND id = ?`, userID, id)
+}
+
+// ---- audit log ----
+
+// MaxAudit is the number of audit entries kept; older ones are removed.
+const MaxAudit = 100_000
+
+// AddAudit appends an entry to the audit log.
+func (s *Store) AddAudit(e model.AuditEntry) error {
+	db, err := s.conn()
+	if err != nil {
+		return err
+	}
+	res, err := db.Exec(`INSERT INTO audit (ts, user, role, ip, event, detail) VALUES (?,?,?,?,?,?)`,
+		unix(e.Time), e.User, e.Role, e.IP, e.Event, e.Detail)
+	if err != nil {
+		return err
+	}
+	// Trim now and then rather than on every insert.
+	if seq, err := res.LastInsertId(); err == nil && seq%500 == 0 {
+		_, err = db.Exec(`DELETE FROM audit WHERE seq <= ?`, seq-MaxAudit)
+		return err
+	}
+	return nil
+}
+
+// Audit returns up to limit audit entries, newest first, older than
+// sequence number before (0: from the newest). A non-empty query selects
+// entries whose user, event, address or detail contains it.
+func (s *Store) Audit(query string, before int64, limit int) []model.AuditEntry {
+	q := `SELECT seq, ts, user, role, ip, event, detail FROM audit WHERE 1=1`
+	var args []any
+	if before > 0 {
+		q += ` AND seq < ?`
+		args = append(args, before)
+	}
+	if query != "" {
+		pat := "%" + likeEscape.Replace(strings.ToLower(query)) + "%"
+		q += ` AND (lower(user) LIKE ? ESCAPE '\' OR lower(event) LIKE ? ESCAPE '\' OR ip LIKE ? ESCAPE '\' OR lower(detail) LIKE ? ESCAPE '\')`
+		args = append(args, pat, pat, pat, pat)
+	}
+	q += ` ORDER BY seq DESC LIMIT ?`
+	rows := s.query(q, append(args, limit)...)
+	defer rows.Close()
+	var out []model.AuditEntry
+	for rows.Next() {
+		var e model.AuditEntry
+		var ts int64
+		must(rows.Scan(&e.Seq, &ts, &e.User, &e.Role, &e.IP, &e.Event, &e.Detail))
+		e.Time = fromUnix(ts)
+		out = append(out, e)
+	}
+	must(rows.Err())
+	return out
+}
+
+// ---- backup, archive, new exercise ----
+
+// CopyInfo describes a copy of the database in BackupDir or ArchiveDir.
+type CopyInfo struct {
+	Name    string
+	Size    int64
+	ModTime time.Time
+}
+
+var copyNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\.db$`)
+
+// CopyTo writes a consistent copy of the whole database to a new file in
+// the given subdirectory (BackupDir or ArchiveDir) of the data directory.
+// It works while the server is in use.
+func (s *Store) CopyTo(subdir, name string) (CopyInfo, error) {
+	if subdir != BackupDir && subdir != ArchiveDir {
+		return CopyInfo{}, errors.New("invalid directory")
+	}
+	if !copyNameRe.MatchString(name) {
+		return CopyInfo{}, errors.New("invalid file name")
+	}
+	path := filepath.Join(s.dir, subdir, name)
+	if _, err := os.Stat(path); err == nil {
+		return CopyInfo{}, fmt.Errorf("%s already exists", name)
+	}
+	// VACUUM INTO writes a compact, transactionally consistent copy.
+	if err := s.exec(`VACUUM INTO ?`, path); err != nil {
+		os.Remove(path)
+		return CopyInfo{}, err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return CopyInfo{}, err
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return CopyInfo{}, err
+	}
+	return CopyInfo{Name: name, Size: fi.Size(), ModTime: fi.ModTime()}, nil
+}
+
+// Copies lists the database copies in a subdirectory, newest first.
+func (s *Store) Copies(subdir string) ([]CopyInfo, error) {
+	if subdir != BackupDir && subdir != ArchiveDir {
+		return nil, errors.New("invalid directory")
+	}
+	entries, err := os.ReadDir(filepath.Join(s.dir, subdir))
+	if err != nil {
+		return nil, err
+	}
+	var out []CopyInfo
+	for _, e := range entries {
+		fi, err := e.Info()
+		if err != nil || !fi.Mode().IsRegular() || !copyNameRe.MatchString(e.Name()) {
+			continue
+		}
+		out = append(out, CopyInfo{Name: e.Name(), Size: fi.Size(), ModTime: fi.ModTime()})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].ModTime.Equal(out[j].ModTime) {
+			return out[i].ModTime.After(out[j].ModTime)
+		}
+		return out[i].Name > out[j].Name
+	})
+	return out, nil
+}
+
+// PruneCopies removes all but the newest keep copies whose name starts
+// with prefix in a subdirectory, and returns how many were removed.
+func (s *Store) PruneCopies(subdir, prefix string, keep int) (int, error) {
+	copies, err := s.Copies(subdir)
+	if err != nil {
+		return 0, err
+	}
+	removed, kept := 0, 0
+	for _, c := range copies {
+		if !strings.HasPrefix(c.Name, prefix) {
+			continue
+		}
+		if kept < keep {
+			kept++
+			continue
+		}
+		if err := os.Remove(filepath.Join(s.dir, subdir, c.Name)); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+// ResetExercise removes everything that belongs to one exercise: reports,
+// requests, chat, drafts and read markers. Accounts, templates, saved
+// filters, settings and the audit log stay.
+func (s *Store) ResetExercise() error {
+	db, err := s.conn()
+	if err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, table := range []string{"reports", "requests", "report_seen", "drafts", "chat_messages", "chat_read"} {
+		if _, err := tx.Exec("DELETE FROM " + table); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ExerciseCounts tells how much a reset would remove.
+type ExerciseCounts struct{ Reports, Requests, ChatMessages, Drafts int }
+
+// Counts returns the size of the current exercise.
+func (s *Store) Counts() ExerciseCounts {
+	db, err := s.conn()
+	must(err)
+	var c ExerciseCounts
+	must(db.QueryRow(`SELECT (SELECT COUNT(*) FROM reports), (SELECT COUNT(*) FROM requests),
+		(SELECT COUNT(*) FROM chat_messages), (SELECT COUNT(*) FROM drafts)`).Scan(&c.Reports, &c.Requests, &c.ChatMessages, &c.Drafts))
+	return c
+}
+
+// BackupFile copies the database of a data directory to dest without
+// taking the directory lock, so it can run next to a live server (used by
+// the -backup command line option).
+func BackupFile(dataDir, dest string) error {
+	src := filepath.Join(dataDir, DBName)
+	if _, err := os.Stat(src); err != nil {
+		return err
+	}
+	if _, err := os.Stat(dest); err == nil {
+		return fmt.Errorf("%s already exists", dest)
+	}
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(src)+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if _, err := db.Exec(`VACUUM INTO ?`, dest); err != nil {
+		os.Remove(dest)
+		return err
+	}
+	return os.Chmod(dest, 0o600)
 }

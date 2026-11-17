@@ -8,13 +8,14 @@
 </div>
 {{end}}
 {{if $d.Template.Description}}<p class="body muted">{{$d.Template.Description}}</p>{{end}}
-<form class="panel" method="post" action="/reports"{{if .Error}} aria-describedby="error"{{end}}>
+{{if not $d.DraftSaved.IsZero}}<p class="notice">{{$.T "Continuing your draft, saved %s." ($.TS $d.DraftSaved)}}</p>{{end}}
+<form class="panel" method="post" action="/reports" id="report-form" data-autosave{{if .Error}} aria-describedby="error"{{end}}>
   <input type="hidden" name="csrf" value="{{.CSRF}}">
   <input type="hidden" name="template" value="{{$d.Template.ID}}">
   {{if $d.Request}}<input type="hidden" name="request" value="{{$d.Request.ID}}">{{end}}
   <p class="help"><span class="req" aria-hidden="true">*</span> {{$.T "marks a required field"}}</p>
   <dl class="meta">
-    <dt>{{$.T "From"}}</dt><dd>{{.User.DisplayName}}</dd>
+    <dt>{{$.T "From"}}</dt><dd>{{if $.Group}}{{$.Group}} <span class="muted">({{.User.DisplayName}})</span>{{else}}{{.User.DisplayName}}{{end}}</dd>
     <dt>{{$.T "Time"}}</dt><dd>{{$.T "set by the server when the report is sent"}}</dd>
   </dl>
   <label for="receiver">{{$.T "To"}}</label>
@@ -48,6 +49,9 @@
   {{end}}
   <label for="content">{{$.T "Content"}} <span class="req" aria-hidden="true">*</span>{{if $d.Template.ContentHelp}} <span class="help" id="content-help">{{$d.Template.ContentHelp}}</span>{{end}}</label>
   <textarea class="big" id="content" name="content" maxlength="20000" required{{if $d.Template.ContentHelp}} aria-describedby="content-help"{{end}}>{{$d.Content}}</textarea>
-  <div class="actions"><button>{{$.T "Send report"}}</button> <a href="/home">{{$.T "Cancel"}}</a></div>
+  <div class="actions"><button name="action" value="send">{{$.T "Send report"}}</button>
+    <button class="plain" name="action" value="draft" formnovalidate>{{$.T "Save as draft"}}</button> <a href="/home">{{$.T "Cancel"}}</a>
+    <span class="help" id="autosave-status" role="status" data-saved="{{$.T "Draft saved automatically."}}" data-failed="{{$.T "The draft could not be saved automatically."}}"></span></div>
+  <p class="help">{{$.T "A draft is kept on the server until you send or delete it. With JavaScript it is saved automatically while you write."}}</p>
 </form>
 {{end}}

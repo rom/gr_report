@@ -200,7 +200,7 @@ func TestNewCountAPI(t *testing.T) {
 	r := e.anon().get("/static/app.js").want(t, 200, "'use strict'")
 	// The script must stay within what the CSP argument relies on: it never
 	// builds markup or evaluates text.
-	for _, banned := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "http://", "https://"} {
+	for _, banned := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function", "http://", "https://", "setAttribute('on", "srcdoc"} {
 		if strings.Contains(r.body, banned) {
 			t.Errorf("app.js uses %s", banned)
 		}

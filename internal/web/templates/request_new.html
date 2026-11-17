@@ -13,6 +13,8 @@
   <select id="template" name="template" required>
     {{range $d.Templates}}<option value="{{.ID}}"{{if eq .ID $d.Req.TemplateID}} selected{{end}}>{{.Name}}</option>{{end}}
   </select>
+  <label for="due">{{$.T "Deadline"}} <span class="help" id="due-help">{{$.T "Optional. Answers after the deadline are still accepted and marked as late. Time zone: %s." $.Zone}}</span></label>
+  <input type="datetime-local" id="due" name="due" value="{{$d.Due}}" aria-describedby="due-help">
   <fieldset>
     <legend>{{$.T "Recipients"}}</legend>
     <label class="inline"><input type="radio" name="to" value="all"{{if not $d.Req.Recipients}} checked{{end}}> {{$.T "All groups"}}</label>

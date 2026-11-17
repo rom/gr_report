@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+	_ "time/tzdata" // time zones without depending on the host's files
 
 	"go.yaml.in/yaml/v3"
 
@@ -50,6 +52,18 @@ type Config struct {
 	// ChatOversightToggle lets the exercise leaders switch oversight on and
 	// off in the user interface; ChatOversight is then the initial state.
 	ChatOversightToggle bool
+	// TimeZone is the IANA name of the time zone times are shown in until
+	// a user chooses another.
+	TimeZone string
+	// RedirectHTTP is a second listen address that serves plain HTTP only
+	// to redirect browsers to the HTTPS address ("" for none).
+	RedirectHTTP string
+	// BackupInterval is how often a backup is made automatically (0: never)
+	// and BackupKeep how many automatic backups are kept.
+	BackupInterval time.Duration
+	BackupKeep     int
+	// BackupTo makes the program copy the database to this file and exit.
+	BackupTo string
 
 	ShowVersion bool
 	PrintConfig bool
@@ -58,7 +72,13 @@ type Config struct {
 // FileConfig is the schema of the YAML configuration file. Pointers tell a
 // setting that is absent from one that is set to its zero value.
 type FileConfig struct {
-	Listen   *string `yaml:"listen,omitempty"`
+	Listen       *string `yaml:"listen,omitempty"`
+	RedirectHTTP *string `yaml:"redirect_http,omitempty"`
+	TimeZone     *string `yaml:"timezone,omitempty"`
+	Backup       struct {
+		Interval *string `yaml:"interval,omitempty"`
+		Keep     *int    `yaml:"keep,omitempty"`
+	} `yaml:"backup,omitempty"`
 	DataDir  *string `yaml:"data_dir,omitempty"`
 	Language *string `yaml:"language,omitempty"`
 	Sandbox  *string `yaml:"sandbox,omitempty"`
@@ -127,6 +147,8 @@ func (c Config) YAML() string {
 	fc.TLS.Cert, fc.TLS.Key = &c.TLSCert, &c.TLSKey
 	fc.Chat.Enabled, fc.Chat.Oversight, fc.Chat.OversightToggle = &c.Chat, &c.ChatOversight, &c.ChatOversightToggle
 	fc.Development.InsecureHTTP, fc.Development.DemoAccounts = &c.InsecureHTTP, &c.DevSeed
+	interval := c.BackupInterval.String()
+	fc.RedirectHTTP, fc.TimeZone, fc.Backup.Interval, fc.Backup.Keep = &c.RedirectHTTP, &c.TimeZone, &interval, &c.BackupKeep
 	out, err := yaml.Marshal(fc)
 	if err != nil {
 		panic(err) // plain strings and booleans always marshal
@@ -154,6 +176,8 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	var cfg Config
 	var f struct {
 		config, addr, port, data, cert, key, mode, lang string
+		zone, redirect, interval                        string
+		keep                                            int
 		insecure, seed, chat, oversight, toggle         bool
 	}
 	fs := flag.NewFlagSet("gr_report", flag.ContinueOnError)
@@ -177,6 +201,11 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	fs.BoolVar(&f.chat, "chat", true, "chat between participants; -chat=false switches it off (file: chat.enabled, env GR_REPORT_CHAT)")
 	fs.BoolVar(&f.oversight, "chat-oversight", false, "let the exercise leader read chat between groups; the groups are told (file: chat.oversight, env GR_REPORT_CHAT_OVERSIGHT)")
 	fs.BoolVar(&f.toggle, "chat-oversight-toggle", true, "let the exercise leader switch oversight on and off in the user interface; -chat-oversight-toggle=false leaves it to the configuration (file: chat.oversight_toggle, env GR_REPORT_CHAT_OVERSIGHT_TOGGLE)")
+	fs.StringVar(&f.zone, "timezone", "", "time `zone` times are shown in until a user chooses one, e.g. Europe/Stockholm; default UTC (file: timezone, env GR_REPORT_TIMEZONE)")
+	fs.StringVar(&f.redirect, "redirect-http", "", "plain HTTP `address` that only redirects to HTTPS, e.g. :8080 (file: redirect_http, env GR_REPORT_REDIRECT_HTTP)")
+	fs.StringVar(&f.interval, "backup-interval", "", "make a backup automatically every `duration`, e.g. 1h; 0 for never (file: backup.interval, env GR_REPORT_BACKUP_INTERVAL)")
+	fs.IntVar(&f.keep, "backup-keep", 0, "`number` of automatic backups to keep; default 10 (file: backup.keep, env GR_REPORT_BACKUP_KEEP)")
+	fs.StringVar(&cfg.BackupTo, "backup", "", "copy the database of the data directory to `file` and exit; works while the server is running")
 	fs.BoolVar(&cfg.PrintConfig, "print-config", false, "print the effective configuration as YAML and exit")
 	fs.BoolVar(&cfg.ShowVersion, "version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
@@ -261,6 +290,41 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	if boolErr != nil {
 		return cfg, boolErr
 	}
+	cfg.TimeZone = str("timezone", f.zone, "GR_REPORT_TIMEZONE", fc.TimeZone, "UTC")
+	if _, err := time.LoadLocation(cfg.TimeZone); err != nil || cfg.TimeZone == "Local" || cfg.TimeZone == "" {
+		return cfg, fmt.Errorf("unknown time zone %q (use a name such as Europe/Stockholm, or UTC)", cfg.TimeZone)
+	}
+	cfg.RedirectHTTP = str("redirect-http", f.redirect, "GR_REPORT_REDIRECT_HTTP", fc.RedirectHTTP, "")
+	if cfg.RedirectHTTP != "" {
+		if _, _, err := net.SplitHostPort(cfg.RedirectHTTP); err != nil {
+			return cfg, fmt.Errorf("invalid HTTP redirect address %q: %w", cfg.RedirectHTTP, err)
+		}
+	}
+	interval := str("backup-interval", f.interval, "GR_REPORT_BACKUP_INTERVAL", fc.Backup.Interval, "0")
+	if interval == "0" || interval == "" {
+		interval = "0s"
+	}
+	var derr error
+	if cfg.BackupInterval, derr = time.ParseDuration(interval); derr != nil || cfg.BackupInterval < 0 ||
+		(cfg.BackupInterval > 0 && cfg.BackupInterval < time.Minute) {
+		return cfg, fmt.Errorf("invalid backup interval %q (use for example 30m or 6h, at least 1m, or 0 for none)", interval)
+	}
+	cfg.BackupKeep = 10
+	switch {
+	case given["backup-keep"]:
+		cfg.BackupKeep = f.keep
+	case getenv("GR_REPORT_BACKUP_KEEP") != "":
+		n, err := strconv.Atoi(getenv("GR_REPORT_BACKUP_KEEP"))
+		if err != nil {
+			return cfg, fmt.Errorf("GR_REPORT_BACKUP_KEEP: %q is not a number", getenv("GR_REPORT_BACKUP_KEEP"))
+		}
+		cfg.BackupKeep = n
+	case fc.Backup.Keep != nil:
+		cfg.BackupKeep = *fc.Backup.Keep
+	}
+	if cfg.BackupKeep < 1 || cfg.BackupKeep > 1000 {
+		return cfg, fmt.Errorf("the number of backups to keep must be between 1 and 1000, not %d", cfg.BackupKeep)
+	}
 
 	var err error
 	if cfg.Sandbox, err = sandbox.ParseMode(mode); err != nil {
@@ -284,6 +348,9 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 	if cfg.DataDir == "" {
 		return cfg, errors.New("the data directory must not be empty")
 	}
+	if cfg.BackupTo != "" {
+		return cfg, nil // only the data directory matters for a backup
+	}
 	hasTLS := cfg.TLSCert != "" || cfg.TLSKey != ""
 	switch {
 	case cfg.InsecureHTTP && hasTLS:
@@ -292,6 +359,8 @@ func ParseConfig(args []string, getenv func(string) string, out io.Writer) (Conf
 		return cfg, errors.New("TLS is required: set tls.cert and tls.key (see scripts/), or development.insecure_http for local development")
 	case cfg.DevSeed && !cfg.InsecureHTTP:
 		return cfg, errors.New("demo accounts are only allowed together with insecure HTTP")
+	case cfg.RedirectHTTP != "" && cfg.InsecureHTTP:
+		return cfg, errors.New("an HTTP redirect needs TLS; it cannot be combined with insecure HTTP")
 	}
 	return cfg, nil
 }

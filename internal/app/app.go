@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -35,8 +36,10 @@ type App struct {
 	// Reload triggers re-reading of the TLS certificate (SIGHUP).
 	Reload <-chan struct{}
 	// Ready, if set, is called with the bound address once the server
-	// accepts connections.
-	Ready func(net.Addr)
+	// accepts connections; RedirectReady with the address of the HTTP
+	// redirect listener, if there is one.
+	Ready         func(net.Addr)
+	RedirectReady func(net.Addr)
 }
 
 // certStore serves the current TLS certificate and can swap it at runtime.
@@ -155,6 +158,45 @@ func starterTemplates(lang i18n.Lang) []model.Template {
 	}
 }
 
+// autoBackup writes one automatic backup and removes the oldest ones.
+func (a *App) autoBackup(st *store.Store) {
+	info, err := st.CopyTo(store.BackupDir, "auto-"+time.Now().UTC().Format("20060102-150405")+".db")
+	if err != nil {
+		a.Log.Error("automatic backup failed", "err", err)
+		return
+	}
+	removed, err := st.PruneCopies(store.BackupDir, "auto-", a.Cfg.BackupKeep)
+	if err != nil {
+		a.Log.Error("removing old backups failed", "err", err)
+	}
+	a.Log.Info("automatic backup", "file", info.Name, "bytes", info.Size, "old_backups_removed", removed)
+}
+
+// RedirectHandler answers every plain HTTP request with a permanent
+// redirect to the same host and path over HTTPS on tlsPort.
+func RedirectHandler(tlsPort string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		// The host comes from the request: refuse anything that is not a
+		// plain host name or address, so the redirect cannot be bent.
+		if host == "" || strings.ContainsAny(host, "/\\@?# \t\r\n") {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if strings.Contains(host, ":") { // bare IPv6 address
+			host = "[" + strings.Trim(host, "[]") + "]"
+		}
+		if tlsPort != "443" && tlsPort != "" {
+			host = net.JoinHostPort(strings.Trim(host, "[]"), tlsPort)
+		}
+		w.Header().Set("Connection", "close")
+		http.Redirect(w, r, "https://"+host+r.URL.RequestURI(), http.StatusPermanentRedirect)
+	})
+}
+
 // Run starts the server and blocks until ctx is cancelled or serving fails.
 func (a *App) Run(ctx context.Context) error {
 	cfg := a.Cfg
@@ -200,6 +242,11 @@ func (a *App) Run(ctx context.Context) error {
 	if a.Cfg.Lang != "" {
 		srv.DefaultLang = a.Cfg.Lang
 	}
+	if a.Cfg.TimeZone != "" && a.Cfg.TimeZone != "UTC" {
+		if loc, err := time.LoadLocation(a.Cfg.TimeZone); err == nil {
+			srv.DefaultZone = loc
+		}
+	}
 	srv.Chat, srv.ChatOversight = a.Cfg.Chat, a.Cfg.Chat && a.Cfg.ChatOversight
 	srv.ChatOversightToggle = a.Cfg.Chat && a.Cfg.ChatOversightToggle
 	if a.Cfg.Chat {
@@ -220,6 +267,16 @@ func (a *App) Run(ctx context.Context) error {
 		return fmt.Errorf("listen: %w", err)
 	}
 	defer ln.Close()
+
+	// Optional plain HTTP listener whose only job is to send browsers to
+	// the HTTPS address. It must be open before the sandbox forbids bind.
+	var redirectLn net.Listener
+	if cfg.RedirectHTTP != "" && !cfg.InsecureHTTP {
+		if redirectLn, err = net.Listen("tcp", cfg.RedirectHTTP); err != nil {
+			return fmt.Errorf("listen (HTTP redirect): %w", err)
+		}
+		defer redirectLn.Close()
+	}
 
 	// Everything the process needs is open now: lock it down.
 	status, err := sandbox.Apply(sb)
@@ -268,6 +325,41 @@ func (a *App) Run(ctx context.Context) error {
 			}
 		}
 	}()
+
+	if redirectLn != nil {
+		_, tlsPort, _ := net.SplitHostPort(ln.Addr().String())
+		rs := &http.Server{
+			Handler:           RedirectHandler(tlsPort),
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       5 * time.Second,
+			WriteTimeout:      5 * time.Second,
+			IdleTimeout:       30 * time.Second,
+			MaxHeaderBytes:    8 << 10,
+			ErrorLog:          slog.NewLogLogger(a.Log.Handler(), slog.LevelDebug),
+		}
+		go func() { _ = rs.Serve(redirectLn) }()
+		defer rs.Close()
+		a.Log.Info("redirecting HTTP to HTTPS", "address", redirectLn.Addr().String())
+		if a.RedirectReady != nil {
+			a.RedirectReady(redirectLn.Addr())
+		}
+	}
+
+	if cfg.BackupInterval > 0 {
+		a.Log.Info("automatic backups", "interval", cfg.BackupInterval.String(), "keep", cfg.BackupKeep)
+		go func() {
+			tick := time.NewTicker(cfg.BackupInterval)
+			defer tick.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-tick.C:
+					a.autoBackup(st)
+				}
+			}
+		}()
+	}
 
 	errc := make(chan error, 1)
 	go func() {

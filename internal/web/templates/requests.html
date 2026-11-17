@@ -2,19 +2,20 @@
 <h1 id="h-requests">{{$.T "Requests"}}</h1>
 {{if eq .User.Role "leader"}}<p><a class="button" href="/requests/new">{{$.T "New request"}}</a></p>{{end}}
 <div class="scroll"><table aria-labelledby="h-requests">
-  <thead><tr><th scope="col">{{$.T "Sent"}}</th><th scope="col">{{$.T "Subject"}}</th><th scope="col">{{$.T "Template"}}</th><th scope="col">{{$.T "Responses"}}</th><th scope="col">{{$.T "State"}}</th>{{if eq .User.Role "group"}}<th scope="col"><span class="sr-only">{{$.T "Actions"}}</span></th>{{end}}</tr></thead>
+  <thead><tr><th scope="col">{{$.T "Sent"}}</th><th scope="col">{{$.T "Subject"}}</th><th scope="col">{{$.T "Template"}}</th><th scope="col">{{$.T "Deadline"}}</th><th scope="col">{{$.T "Responses"}}</th><th scope="col">{{$.T "State"}}</th>{{if eq .User.Role "group"}}<th scope="col"><span class="sr-only">{{$.T "Actions"}}</span></th>{{end}}</tr></thead>
   <tbody>
   {{range .Data}}
   <tr>
-    <td>{{ts .Req.Created}}</td>
+    <td>{{$.TS .Req.Created}}</td>
     <td><a href="/requests/{{.Req.ID}}">{{.Req.Subject}}</a></td>
     <td>{{.TemplateName}}</td>
+    <td>{{if .Req.Due.IsZero}}<span class="muted">–</span>{{else}}{{$.TS .Req.Due}}{{if .Overdue}} <span class="tag new">{{$.T "overdue"}}</span>{{end}}{{end}}</td>
     <td>{{.Responses}}</td>
     <td>{{if .Req.Closed}}<span class="tag">{{$.T "closed"}}</span>{{else}}<span class="tag filed">{{$.T "open"}}</span>{{end}}</td>
     {{if eq $.User.Role "group"}}<td>{{if not .Req.Closed}}<a href="/reports/new?request={{.Req.ID}}" aria-label="{{$.T "Answer: %s" .Req.Subject}}">{{$.T "Answer"}}</a>{{end}}</td>{{end}}
   </tr>
   {{else}}
-  <tr><td colspan="6" class="muted">{{$.T "No requests."}}</td></tr>
+  <tr><td colspan="7" class="muted">{{$.T "No requests."}}</td></tr>
   {{end}}
   </tbody>
 </table></div>

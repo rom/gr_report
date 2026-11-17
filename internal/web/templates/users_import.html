@@ -1,0 +1,32 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>{{$.T "Create several accounts"}}</h1>
+{{if $d.Created}}
+<p class="notice"><strong>{{$.T "%d accounts created." (len $d.Created)}}</strong> {{$.T "The one-time passwords below are shown only now. Print or copy this page before you leave it."}}</p>
+<div class="actions"><button type="button" id="print" data-js-show hidden>{{$.T "Print"}}</button> <a href="/admin/users">{{$.T "Back to accounts"}}</a></div>
+<h2 id="h-created">{{$.T "New accounts"}}</h2>
+<div class="scroll"><table aria-labelledby="h-created" class="credentials">
+  <thead><tr><th scope="col">{{$.T "Display name"}}</th><th scope="col">{{$.T "Role"}}</th><th scope="col">{{$.T "Group"}}</th><th scope="col">{{$.T "Username"}}</th><th scope="col">{{$.T "One-time password"}}</th></tr></thead>
+  <tbody>
+  {{range $d.Created}}<tr><td>{{.DisplayName}}</td><td>{{$.Tr .Role}}</td><td>{{.GroupName}}</td><td><code>{{.Username}}</code></td><td><code>{{.Password}}</code></td></tr>{{end}}
+  </tbody>
+</table></div>
+{{else}}
+{{if $d.Errors}}<ul class="error-list" aria-label="{{$.T "Lines to correct"}}">{{range $d.Errors}}<li>{{.}}</li>{{end}}</ul>{{end}}
+<form class="panel" method="post" action="/admin/users/import"{{if .Error}} aria-describedby="error"{{end}}>
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <label for="accounts">{{$.T "Accounts, one per line"}}</label>
+  <textarea class="big" id="accounts" name="accounts" required spellcheck="false" aria-describedby="accounts-help">{{$d.Text}}</textarea>
+  <div class="help" id="accounts-help">
+    <p>{{$.T "Each line: username; display name; role; group. Separate with semicolons, commas or tabs (you can paste from a spreadsheet)."}}</p>
+    <p>{{$.T "The role is group, leader or admin and may be left out (group). Name a group's username in the fourth position to create a personal account for a member of that group; the group can be created on an earlier line."}}</p>
+    <p>{{$.T "At most %d accounts at once. Either all lines are accepted or nothing is created. Every account gets a one-time password, shown once on the next page." $d.Max}}</p>
+    <pre>alpha; Group Alpha
+anna; Anna Andersson; group; alpha
+bo; Bo Berg; group; alpha
+staff1; Maria Lind; leader</pre>
+  </div>
+  <div class="actions"><button>{{$.T "Create accounts"}}</button> <a href="/admin/users">{{$.T "Cancel"}}</a></div>
+</form>
+{{end}}
+{{end}}

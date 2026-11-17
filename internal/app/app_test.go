@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -426,5 +427,115 @@ func TestStarterTemplatesValid(t *testing.T) {
 	}
 	if starterTemplates(i18n.SV)[1].Name != "Lägesrapport" || starterTemplates(i18n.EN)[0].Name != "Minimal report" {
 		t.Error("starter templates are not in the requested language")
+	}
+}
+
+func TestRedirectHandler(t *testing.T) {
+	cases := []struct{ port, host, uri, want string }{
+		{"443", "report.example.org", "/login?x=1", "https://report.example.org/login?x=1"},
+		{"443", "report.example.org:80", "/", "https://report.example.org/"},
+		{"8443", "report.example.org:8080", "/queue?q=a+b", "https://report.example.org:8443/queue?q=a+b"},
+		{"8443", "192.0.2.7", "/", "https://192.0.2.7:8443/"},
+		{"8443", "[2001:db8::1]:8080", "/x", "https://[2001:db8::1]:8443/x"},
+		{"443", "[2001:db8::1]", "/x", "https://[2001:db8::1]/x"},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest(http.MethodGet, c.uri, nil)
+		req.Host = c.host
+		rec := httptest.NewRecorder()
+		RedirectHandler(c.port).ServeHTTP(rec, req)
+		if rec.Code != http.StatusPermanentRedirect || rec.Header().Get("Location") != c.want {
+			t.Errorf("%s %s -> %d %q, want %q", c.host, c.uri, rec.Code, rec.Header().Get("Location"), c.want)
+		}
+	}
+	// A request body is never read and the method is kept by a 308.
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader("password=secret"))
+	req.Host = "report.example.org"
+	rec := httptest.NewRecorder()
+	RedirectHandler("443").ServeHTTP(rec, req)
+	if rec.Code != http.StatusPermanentRedirect || strings.Contains(rec.Body.String(), "secret") {
+		t.Errorf("POST: %d %q", rec.Code, rec.Body.String())
+	}
+	// Hosts that could bend the redirect are refused.
+	for _, host := range []string{"", "evil.example/@good", "a b", "user@host", "host\\path"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Host = host
+		rec := httptest.NewRecorder()
+		RedirectHandler("443").ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("host %q -> %d %q", host, rec.Code, rec.Header().Get("Location"))
+		}
+	}
+}
+
+func TestRunRedirectTimeZoneAndBackups(t *testing.T) {
+	dir, tlsDir := t.TempDir(), t.TempDir()
+	certFile, keyFile, pool := writeCert(t, tlsDir, "redirect")
+	var logs syncBuffer
+	redirect := make(chan net.Addr, 1)
+	a := &App{Cfg: Config{Addr: "127.0.0.1:0", DataDir: dir, TLSCert: certFile, TLSKey: keyFile, Sandbox: sandbox.ModeOff,
+		RedirectHTTP: "127.0.0.1:0", TimeZone: "Europe/Stockholm", BackupInterval: time.Hour, BackupKeep: 2, Chat: true},
+		Log: slog.New(slog.NewTextHandler(&logs, nil)), RedirectReady: func(addr net.Addr) { redirect <- addr }}
+	base, stop := start(t, a, "https")
+	_, tlsPort, _ := net.SplitHostPort(strings.TrimPrefix(base, "https://"))
+
+	// Plain HTTP is answered with a redirect to the HTTPS port.
+	raddr := <-redirect
+	plain := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := plain.Get("http://" + raddr.String() + "/login?next=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusPermanentRedirect || resp.Header.Get("Location") != "https://127.0.0.1:"+tlsPort+"/login?next=1" {
+		t.Errorf("redirect: %d %q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	// Following it ends on the real login page.
+	follow := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	resp, err = follow.Get("http://" + raddr.String() + "/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.TLS == nil || !strings.Contains(string(body), `action="/login"`) {
+		t.Errorf("followed redirect did not reach the HTTPS login page")
+	}
+
+	// Automatic backups are written and pruned.
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	b := &App{Cfg: Config{BackupKeep: 2}, Log: a.Log}
+	for i := 0; i < 3; i++ {
+		b.autoBackup(st)
+		time.Sleep(1100 * time.Millisecond) // file names have a resolution of one second
+	}
+	copies, err := st.Copies(store.BackupDir)
+	if err != nil || len(copies) != 2 || !strings.HasPrefix(copies[0].Name, "auto-") {
+		t.Errorf("automatic backups: %+v, %v", copies, err)
+	}
+	st.Close()
+	b.autoBackup(st) // a failure is logged, not fatal
+
+	if err := stop(); err != nil {
+		t.Errorf("Run returned %v", err)
+	}
+	for _, want := range []string{"redirecting HTTP to HTTPS", "automatic backups", "automatic backup failed", "old_backups_removed=1"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("log lacks %q", want)
+		}
+	}
+	// The address of the redirect listener being in use is a start-up error.
+	busy, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer busy.Close()
+	c := &App{Cfg: Config{Addr: "127.0.0.1:0", DataDir: t.TempDir(), TLSCert: certFile, TLSKey: keyFile, Sandbox: sandbox.ModeOff, RedirectHTTP: busy.Addr().String()},
+		Log: a.Log, Hasher: auth.Hasher{MemoryKiB: 64, Time: 1}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.Run(ctx); err == nil || !strings.Contains(err.Error(), "HTTP redirect") {
+		t.Errorf("busy redirect port: %v", err)
 	}
 }

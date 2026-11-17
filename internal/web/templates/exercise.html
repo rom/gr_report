@@ -1,0 +1,36 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>{{$.T "Exercise"}}</h1>
+<h2 id="h-current">{{$.T "Current exercise"}}</h2>
+<div class="panel">
+  <dl class="meta" aria-labelledby="h-current">
+    <dt>{{$.T "Reports"}}</dt><dd>{{$d.Counts.Reports}}</dd>
+    <dt>{{$.T "Requests"}}</dt><dd>{{$d.Counts.Requests}}</dd>
+    <dt>{{$.T "Chat messages"}}</dt><dd>{{$d.Counts.ChatMessages}}</dd>
+    <dt>{{$.T "Drafts"}}</dt><dd>{{$d.Counts.Drafts}}</dd>
+  </dl>
+  {{if eq .User.Role "leader"}}<p><a href="/queue/export.csv">{{$.T "Export all reports to the exercise leader (CSV)"}}</a></p>{{end}}
+</div>
+<h2 id="h-new">{{$.T "Start a new exercise"}}</h2>
+<form class="panel" method="post" action="/exercise/reset" aria-describedby="reset-help{{if .Error}} error{{end}}">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <div id="reset-help">
+    <p>{{$.T "This first archives the whole database on the server, then removes all reports, requests, chat messages and drafts. Accounts, templates, saved filters and the audit log are kept."}}</p>
+    <p><strong>{{$.T "It cannot be undone from this interface. Everyone's queues and conversations will be empty."}}</strong></p>
+  </div>
+  <label for="label">{{$.T "Name of the exercise being archived"}} <span class="help">{{$.T "optional, becomes part of the archive's file name"}}</span></label>
+  <input type="text" id="label" name="label" value="{{$d.Label}}" maxlength="60">
+  <label for="confirm">{{$.T "Type %s to confirm" $d.Word}}</label>
+  <input type="text" id="confirm" name="confirm" autocomplete="off" autocapitalize="characters" spellcheck="false" required>
+  <div class="actions"><button>{{$.T "Archive and start a new exercise"}}</button></div>
+</form>
+<h2 id="h-archives">{{$.T "Archived exercises"}}</h2>
+<p class="help">{{$.T "Archives are kept in the archive folder of the server's data directory. Whoever runs the server can open one with gr_report by using it as the database of a separate data directory."}} {{$.T "Times in %s" $.Zone}}</p>
+<div class="scroll"><table aria-labelledby="h-archives">
+  <thead><tr><th scope="col">{{$.T "File name"}}</th><th scope="col">{{$.T "Created"}}</th><th scope="col">{{$.T "Size"}}</th></tr></thead>
+  <tbody>
+  {{range $d.Copies}}<tr><td><code>{{.Name}}</code></td><td>{{$.TS .ModTime}}</td><td>{{size .Size}}</td></tr>
+  {{else}}<tr><td colspan="3" class="muted">{{$.T "No archived exercises."}}</td></tr>{{end}}
+  </tbody>
+</table></div>
+{{end}}

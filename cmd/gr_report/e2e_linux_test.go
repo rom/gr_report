@@ -148,6 +148,31 @@ func TestEndToEndSandboxed(t *testing.T) {
 		t.Fatalf("user creation failed:\n%s", body)
 	}
 
+	// A backup and an archive-and-reset are written inside the sandbox:
+	// new files in the data directory, nothing else.
+	body = page(c.PostForm(base+"/admin/backup", url.Values{"csrf": {csrf}}))
+	if !strings.Contains(body, "created.") {
+		t.Fatalf("backup under the sandbox failed:\n%s", body)
+	}
+	body = page(c.PostForm(base+"/exercise/reset", url.Values{"csrf": {csrf}, "confirm": {"RESET"}, "label": {"e2e"}}))
+	if !strings.Contains(body, "A new exercise has started.") {
+		t.Fatalf("reset under the sandbox failed:\n%s", body)
+	}
+	for _, sub := range []string{"backups", "archive"} {
+		entries, err := os.ReadDir(filepath.Join(dir, "data", sub))
+		if err != nil || len(entries) != 1 {
+			t.Errorf("%s: %v, %d files", sub, err, len(entries))
+		}
+	}
+	// A command line backup next to the running, sandboxed server.
+	cli := filepath.Join(dir, "cli-backup.db")
+	if out, err := exec.Command(bin, "-config", conf, "-backup", cli).CombinedOutput(); err != nil {
+		t.Errorf("-backup next to a running server: %v\n%s", err, out)
+	}
+	if fi, err := os.Stat(cli); err != nil || fi.Size() == 0 {
+		t.Errorf("command line backup: %v %v", fi, err)
+	}
+
 	// Certificate renewal: new files, SIGHUP, no restart.
 	mk()
 	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {

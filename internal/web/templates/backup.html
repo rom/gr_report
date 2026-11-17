@@ -1,0 +1,21 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>{{$.T "Backup"}}</h1>
+<div class="panel">
+  <p>{{$.T "A backup is a complete copy of the database – accounts, templates, reports, requests and chat – written to the backups folder in the server's data directory. It can be made while the system is in use."}}</p>
+  <form method="post" action="/admin/backup">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <div class="actions"><button>{{$.T "Make a backup now"}}</button></div>
+  </form>
+  <p class="help">{{$.T "Backups stay on the server and cannot be downloaded here: they contain everything, including what administrators cannot see in this interface. Whoever runs the server copies them to another machine. Automatic backups are set in the configuration file."}}</p>
+</div>
+<h2 id="h-backups">{{$.T "Backups on the server"}}</h2>
+<p class="help">{{$.T "Times in %s" $.Zone}}</p>
+<div class="scroll"><table aria-labelledby="h-backups">
+  <thead><tr><th scope="col">{{$.T "File name"}}</th><th scope="col">{{$.T "Created"}}</th><th scope="col">{{$.T "Size"}}</th></tr></thead>
+  <tbody>
+  {{range $d.Copies}}<tr><td><code>{{.Name}}</code></td><td>{{$.TS .ModTime}}</td><td>{{size .Size}}</td></tr>
+  {{else}}<tr><td colspan="3" class="muted">{{$.T "No backups yet."}}</td></tr>{{end}}
+  </tbody>
+</table></div>
+{{end}}

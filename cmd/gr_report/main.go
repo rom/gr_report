@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/rom/gr_report/internal/app"
+	"github.com/rom/gr_report/internal/store"
 )
 
 func main() {
@@ -35,6 +36,14 @@ func run(args []string, getenv func(string) string, stdout, stderr io.Writer) in
 	}
 	if cfg.PrintConfig {
 		fmt.Fprint(stdout, cfg.YAML())
+		return 0
+	}
+	if cfg.BackupTo != "" {
+		if err := store.BackupFile(cfg.DataDir, cfg.BackupTo); err != nil {
+			fmt.Fprintln(stderr, "gr_report: backup:", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "backup written to", cfg.BackupTo)
 		return 0
 	}
 	log := slog.New(slog.NewTextHandler(stderr, nil))

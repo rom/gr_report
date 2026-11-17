@@ -10,12 +10,18 @@
     <div><label for="role">{{$.T "Role"}}</label><select id="role" name="role">
       {{range $d.Roles}}<option value="{{.}}"{{if eq . $d.Form.Role}} selected{{end}}>{{$.Tr .}}</option>{{end}}
     </select></div>
+    <div><label for="group">{{$.T "Member of group"}}</label><select id="group" name="group" aria-describedby="group-help">
+      <option value="">{{$.T "– none –"}}</option>
+      {{range $d.Groups}}<option value="{{.ID}}"{{if eq .ID $d.Form.GroupID}} selected{{end}}>{{.DisplayName}}</option>{{end}}
+    </select></div>
     <div class="actions"><button>{{$.T "Create"}}</button></div>
   </div>
+  <p class="help" id="group-help">{{$.T "Choose a group to create a personal account for one member of it: that person reports and chats as the group, and their name is recorded. Leave it empty for the group's own, shared account."}}</p>
+  <p><a href="/admin/users/import">{{$.T "Create several accounts at once"}}</a></p>
   <p class="help">{{$.T "A group account is shared by one participating group (or person). A one-time password is generated and shown once."}}</p>
 </form>
 <div class="scroll"><table aria-labelledby="h-accounts">
-  <thead><tr><th scope="col">{{$.T "Username"}}</th><th scope="col">{{$.T "Display name"}}</th><th scope="col">{{$.T "Role"}}</th><th scope="col">{{$.T "State"}}</th><th scope="col">{{$.T "Actions"}}</th></tr></thead>
+  <thead><tr><th scope="col">{{$.T "Username"}}</th><th scope="col">{{$.T "Display name"}}</th><th scope="col">{{$.T "Role"}}</th><th scope="col">{{$.T "Group"}}</th><th scope="col">{{$.T "State"}}</th><th scope="col">{{$.T "Actions"}}</th></tr></thead>
   <tbody>
   {{range $d.Users}}
   <tr>
@@ -28,6 +34,7 @@
       </form>
     </td>
     <td>{{$.Tr .Role}}</td>
+    <td>{{if .GroupID}}{{index $d.GroupNames .GroupID}}{{else if eq .Role "group"}}<span class="muted">{{$.T "shared account"}}</span>{{end}}</td>
     <td>{{if .Disabled}}<span class="tag new">{{$.T "disabled"}}</span>{{else if .MustChange}}<span class="tag">{{$.T "one-time password"}}</span>{{else}}<span class="tag filed">{{$.T "active"}}</span>{{end}}</td>
     <td>
       {{if ne .ID $d.Self}}

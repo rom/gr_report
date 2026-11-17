@@ -292,6 +292,13 @@ form.inlineform { display: inline; }
 .chat-meta { color: var(--muted); font-size: .9rem; }
 .chat-meta strong { color: var(--ink); }
 textarea.chat-input { min-height: 4.5rem; }
+.saved { list-style: none; margin: 0 0 .5rem; padding: 0; }
+.saved li { padding: .3rem 0; border-bottom: var(--line-width) solid var(--line); overflow-wrap: anywhere; }
+.unread { color: var(--new); margin-right: .25rem; }
+.error-list { background: var(--warn-bg); border: 2px solid var(--new); border-radius: 6px; margin: 0 0 1rem; padding: .6rem .9rem .6rem 2rem; }
+code, pre { font-family: ui-monospace, "Cascadia Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace; font-size: .95em; }
+pre { background: var(--row); border: var(--line-width) solid var(--line); border-radius: 4px; padding: .5rem .75rem; overflow-x: auto; }
+aside h2, nav.panel h3, section h3 { font-size: 1rem; margin: 1.25rem 0 .4rem; }
 .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .75rem; list-style: none; padding: 0; margin: .5rem 0 0; }
 .swatch { border: var(--line-width) solid var(--border); border-radius: 6px; padding: .6rem; background: var(--bg); color: var(--ink); }
 .swatch .chip { display: inline-block; padding: 0 .5em; border-radius: 4px; background: var(--accent); color: var(--accent-ink); font-weight: 700; }
@@ -307,6 +314,8 @@ footer.foot { max-width: 1200px; margin: 0 auto; padding: 0 1rem 1.5rem; color: 
   * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
 @media print {
+  table.credentials td { padding: .8rem .6rem; border: 1px solid #000; }
+  .notice, .flash { border: 1px solid #000; background: #fff; }
   header.top, .skip, .bulk, .filters, .actions, aside, footer.foot { display: none; }
   body { background: #fff; color: #000; }
 }

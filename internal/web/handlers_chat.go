@@ -139,16 +139,17 @@ func (s *Server) chatPeerName(c *reqCtx, party, peer string) (string, bool) {
 	case model.ReceiverLeader:
 		return c.t(model.ReceiverLeaderName), true
 	}
-	if u, ok := s.Store.User(peer); ok && u.Role == model.RoleGroup {
+	// A peer is a group, never one of its members.
+	if u, ok := s.Store.User(peer); ok && u.Role == model.RoleGroup && u.GroupID == "" {
 		return u.DisplayName, true
 	}
 	return "", false
 }
 
-func chatLines(msgs []model.ChatMessage, party string) []chatLine {
+func (c *reqCtx) chatLines(msgs []model.ChatMessage, party string) []chatLine {
 	lines := make([]chatLine, 0, len(msgs))
 	for _, m := range msgs {
-		lines = append(lines, chatLine{Seq: m.Seq, Time: fmtTime(m.Timestamp), Sender: m.SenderName, Body: m.Body,
+		lines = append(lines, chatLine{Seq: m.Seq, Time: c.ts(m.Timestamp), Sender: m.SenderName, Body: m.Body,
 			Mine: m.SenderParty == party, Overseen: m.Overseen})
 	}
 	return lines
@@ -178,7 +179,7 @@ func (s *Server) chatPage(c *reqCtx, status int, draft, errMsg string) {
 		msgs = msgs[1:]
 		v.EarlierURL = v.BaseURL + "?before=" + strconv.FormatInt(msgs[0].Seq, 10)
 	}
-	v.Lines = chatLines(msgs, party)
+	v.Lines = c.chatLines(msgs, party)
 	if n := len(msgs); n > 0 {
 		v.Last = msgs[n-1].Seq
 		if before == 0 {
@@ -216,7 +217,7 @@ func (s *Server) chatPage(c *reqCtx, status int, draft, errMsg string) {
 		add(model.ReceiverLeader, c.t(model.ReceiverLeaderName))
 	}
 	for _, g := range s.Store.Users() {
-		if g.Role != model.RoleGroup || g.ID == party {
+		if g.Role != model.RoleGroup || g.GroupID != "" || g.ID == party {
 			continue
 		}
 		cv, _, _ := model.ChatConv(party, g.ID)
@@ -260,7 +261,7 @@ func (s *Server) chatSend(c *reqCtx) {
 	}
 	conv, a, b := model.ChatConv(party, peer)
 	m, err := s.Store.AddChatMessage(model.ChatMessage{Conv: conv, Timestamp: s.Now().UTC(), SenderParty: party,
-		SenderName: c.user.DisplayName, Body: body, Overseen: s.overseen(party, peer)}, a, b)
+		SenderName: c.senderName(), Body: body, Overseen: s.overseen(party, peer)}, a, b)
 	if s.storeErr(c, err) {
 		return
 	}
@@ -291,7 +292,7 @@ func (s *Server) chatPoll(c *reqCtx) {
 		}
 	}
 	c.w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(c.w).Encode(map[string]any{"messages": chatLines(msgs, party), "oversight": s.overseen(party, peer)})
+	_ = json.NewEncoder(c.w).Encode(map[string]any{"messages": c.chatLines(msgs, party), "oversight": s.overseen(party, peer)})
 }
 
 // chatUnreadTotal is the number shown on the Chat menu entry.
@@ -404,7 +405,8 @@ func (s *Server) oversightLinks(c *reqCtx, activeConv string) []oversightLink {
 func (s *Server) oversightPair(c *reqCtx) (a, b model.User, conv string, ok bool) {
 	a, okA := s.Store.User(c.r.PathValue("a"))
 	b, okB := s.Store.User(c.r.PathValue("b"))
-	if !s.OversightOn() || !okA || !okB || a.Role != model.RoleGroup || b.Role != model.RoleGroup || a.ID == b.ID {
+	if !s.OversightOn() || !okA || !okB || a.Role != model.RoleGroup || b.Role != model.RoleGroup || a.ID == b.ID ||
+		a.GroupID != "" || b.GroupID != "" {
 		return a, b, "", false
 	}
 	conv, _, _ = model.ChatConv(a.ID, b.ID)
@@ -432,7 +434,7 @@ func (s *Server) chatOversight(c *reqCtx) {
 		msgs = msgs[1:]
 		v.EarlierURL = v.BaseURL + "?before=" + strconv.FormatInt(msgs[0].Seq, 10)
 	}
-	v.Lines = chatLines(msgs, "")
+	v.Lines = c.chatLines(msgs, "")
 	if n := len(msgs); n > 0 {
 		v.Last = msgs[n-1].Seq
 	}
@@ -471,7 +473,7 @@ func (s *Server) chatOversightPoll(c *reqCtx) {
 		s.audit(c, "chat_oversight_view", "conversation", conv, "messages", len(msgs), "live", true)
 	}
 	c.w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(c.w).Encode(map[string]any{"messages": chatLines(msgs, "")})
+	_ = json.NewEncoder(c.w).Encode(map[string]any{"messages": c.chatLines(msgs, "")})
 }
 
 // oversightSwitch builds the oversight control for a leader's chat page.
@@ -483,11 +485,21 @@ func (s *Server) oversightSwitch(c *reqCtx) *oversightSwitch {
 	sw := &oversightSwitch{On: on, CanToggle: s.ChatOversightToggle}
 	switch {
 	case fromUI && on:
-		sw.Info = c.t("Switched on by %s at %s.", set.UpdatedBy, fmtTime(set.UpdatedAt))
+		sw.Info = c.t("Switched on by %s at %s.", set.UpdatedBy, c.ts(set.UpdatedAt))
 	case fromUI:
-		sw.Info = c.t("Switched off by %s at %s.", set.UpdatedBy, fmtTime(set.UpdatedAt))
+		sw.Info = c.t("Switched off by %s at %s.", set.UpdatedBy, c.ts(set.UpdatedAt))
 	case !s.ChatOversightToggle:
 		sw.Info = c.t("This is set in the server configuration and cannot be changed here.")
 	}
 	return sw
+}
+
+// senderName is how the user appears on a chat message: a member of a
+// group is shown with the group, so both the person and the party are
+// clear.
+func (c *reqCtx) senderName() string {
+	if c.user.GroupID != "" {
+		return c.user.DisplayName + " (" + c.group.DisplayName + ")"
+	}
+	return c.user.DisplayName
 }

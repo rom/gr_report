@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,8 +117,9 @@ func TestCRUDAndOrdering(t *testing.T) {
 	if r, ok := s.Report("r1"); !ok || r.Fields[0].Value != "v" {
 		t.Error("Report(r1)")
 	}
-	st := s.Stats("leader")
-	if st.Total["g1"] != 2 || st.New["g1"] != 1 || st.New["g2"] != 1 || strings.Join(st.Folders, ",") != "A,B" {
+	st := s.Stats("leader", "viewer")
+	// Nothing has been opened by this viewer, whatever the shared status.
+	if st.Total["g1"] != 2 || st.New["g1"] != 2 || st.New["g2"] != 1 || strings.Join(st.Folders, ",") != "A,B" {
 		t.Errorf("Stats = %+v", st)
 	}
 
@@ -326,7 +328,7 @@ func TestSearch(t *testing.T) {
 	if rs := s.Reports(&model.ReportFilter{To: from}); len(rs) != 0 {
 		t.Errorf("To filter = %d", len(rs))
 	}
-	if n := s.NewCount("leader"); n != 3 {
+	if n := s.NewCount("leader", "viewer"); n != 3 {
 		t.Errorf("NewCount = %d", n)
 	}
 }
@@ -340,7 +342,9 @@ func TestReadFailurePanics(t *testing.T) {
 		"Template": func() { s.Template("t1") }, "Templates": func() { s.Templates(true) },
 		"Request": func() { s.Request("q1") }, "Requests": func() { s.Requests() },
 		"Report": func() { s.Report("r1") }, "Reports": func() { s.Reports(nil) },
-		"Stats": func() { s.Stats("leader") }, "NewCount": func() { s.NewCount("leader") },
+		"Stats": func() { s.Stats("leader", "v") }, "NewCount": func() { s.NewCount("leader", "v") },
+		"Draft": func() { s.Draft("u", "t", "") }, "Drafts": func() { s.Drafts("u") }, "SavedFilters": func() { s.SavedFilters("u") },
+		"Audit": func() { s.Audit("", 0, 10) }, "Counts": func() { s.Counts() },
 		"ChatMessages": func() { s.ChatMessages("all", 0, 0, 1, false) }, "ChatUnread": func() { s.ChatUnread("g1") },
 		"ChatOverseen": func() { s.ChatOverseen() }, "Setting": func() { s.Setting("k") },
 	}
@@ -556,14 +560,23 @@ func TestMigrationFromEarlierVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seed(t, s)
+	// Rows as the old schema stored them.
+	for _, q := range []string{
+		`INSERT INTO users (id, username, display_name, role, pass_hash, created) VALUES ('g1','alpha','Alpha','group','x',1), ('g2','bravo','Bravo','group','x',1)`,
+		`INSERT INTO reports (id, ts, sender_id, sender_name, subject, content, receiver_id, receiver_name, template_id, template_name, fields, request_id, status, folder, search_text)
+			VALUES ('r1',1,'g1','A','one','c','leader','L','','','null','','new','','x')`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// A chat message written before the oversight column existed.
 	if _, err := s.db.Exec(`INSERT INTO chat_messages (conv, party_a, party_b, ts, sender_party, sender_name, body) VALUES ('g1|g2','g1','g2',1,'g1','A','old and private')`); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
 	s2 := open(t, dir)
-	if len(s2.Reports(nil)) != 4 || len(s2.Users()) != 4 {
+	if len(s2.Reports(nil)) != 1 || len(s2.Users()) != 2 {
 		t.Error("data lost in the upgrade")
 	}
 	conv, a, b := model.ChatConv("g1", "g2")
@@ -638,4 +651,425 @@ func FuzzReportRoundTrip(f *testing.F) {
 			t.Fatalf("table damaged: %d rows, %v", n, err)
 		}
 	})
+}
+
+func TestSeenAndAssignment(t *testing.T) {
+	s := open(t, t.TempDir())
+	seed(t, s)
+	ids := func(f model.ReportFilter) string {
+		rs := s.Reports(&f)
+		model.SortReports(rs, model.SortSubject, false)
+		out := ""
+		for _, r := range rs {
+			out += r.ID
+			if r.Unseen {
+				out += "*"
+			}
+			out += " "
+		}
+		return out
+	}
+	// Nothing has been opened: everything is unseen for a viewer, and
+	// Unseen is only reported when a viewer is named.
+	if got := ids(model.ReportFilter{ReceiverID: "leader", ViewerID: "l1"}); got != "r1* r3* r2* " {
+		t.Errorf("fresh queue = %q", got)
+	}
+	if got := ids(model.ReportFilter{ReceiverID: "leader"}); got != "r1 r3 r2 " {
+		t.Errorf("without viewer = %q", got)
+	}
+	// Read state is per user.
+	for _, id := range []string{"r1", "r1", "r3"} {
+		if err := s.MarkSeen("l1", id, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := ids(model.ReportFilter{ReceiverID: "leader", ViewerID: "l1"}); got != "r1 r3 r2* " {
+		t.Errorf("after l1 read = %q", got)
+	}
+	if got := ids(model.ReportFilter{ReceiverID: "leader", ViewerID: "l2"}); got != "r1* r3* r2* " {
+		t.Errorf("l2 unaffected = %q", got)
+	}
+	if got := ids(model.ReportFilter{ReceiverID: "leader", ViewerID: "l1", UnseenOnly: true}); got != "r2* " {
+		t.Errorf("unseen only = %q", got)
+	}
+	if n1, n2 := s.NewCount("leader", "l1"), s.NewCount("leader", "l2"); n1 != 1 || n2 != 3 {
+		t.Errorf("NewCount l1=%d l2=%d", n1, n2)
+	}
+	st := s.Stats("leader", "l1")
+	if st.Total["g1"] != 2 || st.New["g1"] != 1 || st.New["g2"] != 0 || st.Total["g2"] != 1 {
+		t.Errorf("Stats = %+v", st)
+	}
+	if err := s.MarkSeen("l1", "r1", false); err != nil {
+		t.Fatal(err)
+	}
+	if n := s.NewCount("leader", "l1"); n != 2 {
+		t.Errorf("after marking unread: %d", n)
+	}
+
+	// Assignment and author travel with the report and can be filtered.
+	if _, err := s.UpdateReport("r1", func(r *model.Report) bool { r.AssigneeID, r.AssigneeName = "l1", "Leader One"; return true }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutReport(model.Report{ID: "r9", SenderID: "g1", ReceiverID: "leader", Subject: "nine", AuthorID: "p1", AuthorName: "Anna Åkesson", Status: model.StatusNew}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(model.ReportFilter{AssigneeID: "l1"}); got != "r1 " {
+		t.Errorf("assigned to l1 = %q", got)
+	}
+	if got := ids(model.ReportFilter{ReceiverID: "leader", AssigneeID: model.AssigneeNone}); got != "r9 r3 r2 " {
+		t.Errorf("unassigned = %q", got)
+	}
+	if got := ids(model.ReportFilter{Query: "åkesson"}); got != "r9 " {
+		t.Errorf("search by author = %q", got)
+	}
+	r, _ := s.Report("r9")
+	if r.AuthorID != "p1" || r.AuthorName != "Anna Åkesson" || r.Unseen {
+		t.Errorf("report = %+v", r)
+	}
+	if r1, _ := s.Report("r1"); r1.AssigneeName != "Leader One" {
+		t.Errorf("assignee lost: %+v", r1)
+	}
+	s.Close()
+	if err := s.MarkSeen("l1", "r1", true); !errors.Is(err, ErrClosed) {
+		t.Errorf("MarkSeen on closed store: %v", err)
+	}
+}
+
+func TestGroupsAndMembers(t *testing.T) {
+	s := open(t, t.TempDir())
+	seed(t, s)
+	for _, u := range []model.User{
+		{ID: "p1", Username: "anna", DisplayName: "Anna", Role: model.RoleGroup, GroupID: "g1"},
+		{ID: "p2", Username: "bo", DisplayName: "Bo", Role: model.RoleGroup, GroupID: "g1"},
+	} {
+		if err := s.PutUser(u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Members are not groups of their own.
+	if g := s.Groups(); len(g) != 2 || g[0].ID != "g1" || g[1].ID != "g2" {
+		t.Errorf("Groups = %+v", g)
+	}
+	if m := s.Members("g1"); len(m) != 2 || m[0].ID != "p1" || m[1].GroupID != "g1" {
+		t.Errorf("Members(g1) = %+v", m)
+	}
+	if m := s.Members("g2"); len(m) != 0 {
+		t.Errorf("Members(g2) = %+v", m)
+	}
+	if m := s.Members(""); len(m) != 0 {
+		t.Errorf("Members(\"\") = %+v", m)
+	}
+	anna, _ := s.UserByUsername("anna")
+	group, _ := s.User("g1")
+	leader := model.User{ID: "l1", Role: model.RoleLeader}
+	admin, _ := s.User("u1")
+	if anna.Party() != "g1" || group.Party() != "g1" || leader.Party() != model.ReceiverLeader || admin.Party() != "" {
+		t.Error("Party")
+	}
+	if !anna.Personal() || group.Personal() || !leader.Personal() {
+		t.Error("Personal")
+	}
+}
+
+func TestRequestDue(t *testing.T) {
+	s := open(t, t.TempDir())
+	due := t0.Add(2 * time.Hour)
+	if err := s.PutRequest(model.Request{ID: "q1", Subject: "s", TemplateID: "t1", Created: t0, Due: due}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRequest(model.Request{ID: "q2", Subject: "s", TemplateID: "t1", Created: t0}); err != nil {
+		t.Fatal(err)
+	}
+	q1, _ := s.Request("q1")
+	q2, _ := s.Request("q2")
+	if !q1.Due.Equal(due) || !q2.Due.IsZero() {
+		t.Errorf("due: %v %v", q1.Due, q2.Due)
+	}
+	if q1.Overdue(due) || !q1.Overdue(due.Add(time.Second)) || q2.Overdue(due.Add(time.Hour)) {
+		t.Error("Overdue")
+	}
+	q1.Closed = true
+	if q1.Overdue(due.Add(time.Hour)) {
+		t.Error("a closed request is never overdue")
+	}
+}
+
+func TestDrafts(t *testing.T) {
+	s := open(t, t.TempDir())
+	d, err := s.PutDraft(model.Draft{ID: "d1", UserID: "u1", TemplateID: "t1", Subject: "half", Content: "written",
+		Values: map[string]string{"loc": "Åre"}, Receiver: "leader", Updated: t0})
+	if err != nil || d.ID != "d1" {
+		t.Fatal(d, err)
+	}
+	// Saving again for the same template and request replaces it.
+	d, err = s.PutDraft(model.Draft{ID: "d2", UserID: "u1", TemplateID: "t1", Subject: "more", Updated: t0.Add(time.Minute)})
+	if err != nil || d.ID != "d1" {
+		t.Fatalf("replace: %+v, %v", d, err)
+	}
+	if _, err := s.PutDraft(model.Draft{ID: "d3", UserID: "u1", TemplateID: "t1", RequestID: "q1", Subject: "answer", Updated: t0.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PutDraft(model.Draft{ID: "d4", UserID: "u2", TemplateID: "t1", Subject: "other user", Updated: t0}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := s.Draft("u1", "t1", "")
+	if !ok || got.Subject != "more" || got.Values != nil || !got.Updated.Equal(t0.Add(time.Minute)) {
+		t.Errorf("Draft = %+v, %v", got, ok)
+	}
+	if _, ok := s.Draft("u1", "t2", ""); ok {
+		t.Error("draft for another template found")
+	}
+	list := s.Drafts("u1")
+	if len(list) != 2 || list[0].ID != "d3" || list[1].ID != "d1" {
+		t.Errorf("Drafts = %+v", list)
+	}
+	// Only the owner can delete.
+	if err := s.DeleteDraft("u2", "d1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Drafts("u1")) != 2 {
+		t.Error("another user deleted a draft")
+	}
+	if err := s.DeleteDraft("u1", "d1"); err != nil || len(s.Drafts("u1")) != 1 {
+		t.Errorf("delete: %v", err)
+	}
+	for i := 0; i < model.MaxDrafts+2; i++ {
+		_, err = s.PutDraft(model.Draft{ID: model.NewID(), UserID: "u9", TemplateID: fmt.Sprint("t", i), Updated: t0})
+	}
+	if !errors.Is(err, ErrTooMany) || len(s.Drafts("u9")) != model.MaxDrafts {
+		t.Errorf("limit: %v, %d drafts", err, len(s.Drafts("u9")))
+	}
+	// At the limit an existing draft can still be saved.
+	if _, err := s.PutDraft(model.Draft{ID: model.NewID(), UserID: "u9", TemplateID: "t0", Subject: "again", Updated: t0}); err != nil {
+		t.Errorf("update at the limit: %v", err)
+	}
+	for _, bad := range []model.Draft{{ID: "bad id", UserID: "u", TemplateID: "t"}, {ID: "d", TemplateID: "t"}, {ID: "d", UserID: "u"}} {
+		if _, err := s.PutDraft(bad); err == nil {
+			t.Errorf("invalid draft %+v accepted", bad)
+		}
+	}
+	s.Close()
+	if _, err := s.PutDraft(model.Draft{ID: "d1", UserID: "u1", TemplateID: "t1"}); !errors.Is(err, ErrClosed) {
+		t.Errorf("closed store: %v", err)
+	}
+}
+
+func TestSavedFilters(t *testing.T) {
+	s := open(t, t.TempDir())
+	for _, f := range []model.SavedFilter{
+		{ID: "f1", UserID: "u1", Name: "urgent", Query: "status=new"}, {ID: "f2", UserID: "u1", Name: "Alpha", Query: "group=g1"},
+		{ID: "f3", UserID: "u2", Name: "mine", Query: "q=x"},
+	} {
+		if err := s.PutSavedFilter(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := s.SavedFilters("u1")
+	if len(list) != 2 || list[0].Name != "Alpha" || list[1].Query != "status=new" {
+		t.Errorf("SavedFilters = %+v", list)
+	}
+	if err := s.DeleteSavedFilter("u2", "f1"); err != nil || len(s.SavedFilters("u1")) != 2 {
+		t.Error("another user deleted a filter")
+	}
+	if err := s.DeleteSavedFilter("u1", "f1"); err != nil || len(s.SavedFilters("u1")) != 1 {
+		t.Error("delete failed")
+	}
+	var err error
+	for i := 0; i < model.MaxSavedFilters+2; i++ {
+		err = s.PutSavedFilter(model.SavedFilter{ID: model.NewID(), UserID: "u9", Name: fmt.Sprint("n", i), Query: "q"})
+	}
+	if !errors.Is(err, ErrTooMany) || len(s.SavedFilters("u9")) != model.MaxSavedFilters {
+		t.Errorf("limit: %v, %d", err, len(s.SavedFilters("u9")))
+	}
+	for _, bad := range []model.SavedFilter{{ID: "X Y", UserID: "u", Name: "n"}, {ID: "f", Name: "n"}, {ID: "f", UserID: "u"}} {
+		if err := s.PutSavedFilter(bad); err == nil {
+			t.Errorf("invalid filter %+v accepted", bad)
+		}
+	}
+	s.Close()
+	if err := s.PutSavedFilter(model.SavedFilter{ID: "f1", UserID: "u1", Name: "n"}); !errors.Is(err, ErrClosed) {
+		t.Errorf("closed store: %v", err)
+	}
+}
+
+func TestAudit(t *testing.T) {
+	s := open(t, t.TempDir())
+	for i, e := range []model.AuditEntry{
+		{Time: t0, User: "alpha", Role: "group", IP: "10.0.0.1", Event: "login"},
+		{Time: t0.Add(time.Minute), User: "Leader", Role: "leader", IP: "10.0.0.2", Event: "chat_oversight_set", Detail: "oversight=on"},
+		{Time: t0.Add(2 * time.Minute), User: "alpha", Role: "group", IP: "10.0.0.1", Event: "report_sent", Detail: "report=abc 100%_done"},
+	} {
+		if err := s.AddAudit(e); err != nil {
+			t.Fatal(i, err)
+		}
+	}
+	all := s.Audit("", 0, 10)
+	if len(all) != 3 || all[0].Event != "report_sent" || all[2].Event != "login" || !all[1].Time.Equal(t0.Add(time.Minute)) || all[1].IP != "10.0.0.2" {
+		t.Errorf("Audit = %+v", all)
+	}
+	for q, want := range map[string]int{"alpha": 2, "LEADER": 1, "oversight": 1, "10.0.0.2": 1, "report=abc": 1, "100%_": 1, "%": 1, "nomatch": 0, "'; DROP TABLE audit;--": 0} {
+		if got := len(s.Audit(q, 0, 10)); got != want {
+			t.Errorf("Audit(%q) = %d entries, want %d", q, got, want)
+		}
+	}
+	if page := s.Audit("", all[0].Seq, 1); len(page) != 1 || page[0].Seq != all[1].Seq {
+		t.Errorf("paging = %+v", page)
+	}
+	if got := s.Audit("", 0, 2); len(got) != 2 {
+		t.Errorf("limit = %d", len(got))
+	}
+	s.Close()
+	if err := s.AddAudit(model.AuditEntry{Event: "x"}); !errors.Is(err, ErrClosed) {
+		t.Errorf("closed store: %v", err)
+	}
+}
+
+func TestCopiesAndReset(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir)
+	seed(t, s)
+	if _, err := s.PutDraft(model.Draft{ID: "d1", UserID: "g1", TemplateID: "t1", Updated: t0}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddChatMessage(model.ChatMessage{Conv: "all", SenderParty: "g1", SenderName: "A", Body: "hi", Timestamp: t0}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.MarkSeen("u1", "r1", true)
+	_ = s.AddAudit(model.AuditEntry{Event: "kept", Time: t0})
+	_ = s.PutSavedFilter(model.SavedFilter{ID: "f1", UserID: "u1", Name: "n", Query: "q"})
+	if c := s.Counts(); c.Reports != 4 || c.Requests != 3 || c.ChatMessages != 1 || c.Drafts != 1 {
+		t.Errorf("Counts = %+v", c)
+	}
+
+	// A copy is a complete, consistent database of its own.
+	info, err := s.CopyTo(ArchiveDir, "exercise-1.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ArchiveDir, "exercise-1.db")
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 || fi.Size() != info.Size || info.Size == 0 {
+		t.Fatalf("copy: %v %v %+v", fi, err, info)
+	}
+	if _, err := s.CopyTo(ArchiveDir, "exercise-1.db"); err == nil {
+		t.Error("existing copy overwritten")
+	}
+	for _, bad := range []string{"", "x", "../evil.db", "a/b.db", ".hidden.db", "x.db.txt", strings.Repeat("a", 120) + ".db"} {
+		if _, err := s.CopyTo(BackupDir, bad); err == nil {
+			t.Errorf("file name %q accepted", bad)
+		}
+	}
+	if _, err := s.CopyTo("elsewhere", "x.db"); err == nil {
+		t.Error("arbitrary directory accepted")
+	}
+	if _, err := s.Copies("elsewhere"); err == nil {
+		t.Error("listing of an arbitrary directory accepted")
+	}
+
+	// Reset removes the exercise but keeps accounts, templates, saved
+	// filters and the audit log.
+	if err := s.ResetExercise(); err != nil {
+		t.Fatal(err)
+	}
+	if c := s.Counts(); c != (ExerciseCounts{}) {
+		t.Errorf("after reset: %+v", c)
+	}
+	if len(s.Users()) != 4 || len(s.Templates(true)) != 3 || len(s.SavedFilters("u1")) != 1 || len(s.Audit("", 0, 10)) != 1 {
+		t.Error("reset removed more than the exercise")
+	}
+	if n := s.NewCount("leader", "u1"); n != 0 {
+		t.Errorf("read markers left behind: %d", n)
+	}
+	// The archive still holds what was removed.
+	arch := t.TempDir()
+	if err := os.Rename(path, filepath.Join(arch, DBName)); err != nil {
+		t.Fatal(err)
+	}
+	old := open(t, arch)
+	if c := old.Counts(); c.Reports != 4 || c.ChatMessages != 1 {
+		t.Errorf("archive content: %+v", c)
+	}
+
+	// Backups: listing newest first, pruning by prefix.
+	for i, name := range []string{"auto-1.db", "auto-2.db", "auto-3.db", "manual-1.db"} {
+		if _, err := s.CopyTo(BackupDir, name); err != nil {
+			t.Fatal(err)
+		}
+		ts := t0.Add(time.Duration(i) * time.Hour)
+		if err := os.Chtimes(filepath.Join(dir, BackupDir, name), ts, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = os.WriteFile(filepath.Join(dir, BackupDir, "notes.txt"), []byte("x"), 0o600)
+	list, err := s.Copies(BackupDir)
+	if err != nil || len(list) != 4 || list[0].Name != "manual-1.db" || list[3].Name != "auto-1.db" {
+		t.Errorf("Copies = %+v, %v", list, err)
+	}
+	if n, err := s.PruneCopies(BackupDir, "auto-", 1); err != nil || n != 2 {
+		t.Errorf("prune removed %d, %v", n, err)
+	}
+	list, _ = s.Copies(BackupDir)
+	if len(list) != 2 || list[0].Name != "manual-1.db" || list[1].Name != "auto-3.db" {
+		t.Errorf("after prune = %+v", list)
+	}
+
+	// Command line backup next to a live server.
+	dest := filepath.Join(t.TempDir(), "cli.db")
+	if err := BackupFile(dir, dest); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(dest); err != nil || fi.Mode().Perm() != 0o600 || fi.Size() == 0 {
+		t.Errorf("cli backup: %v %v", fi, err)
+	}
+	if err := BackupFile(dir, dest); err == nil {
+		t.Error("cli backup overwrote a file")
+	}
+	if err := BackupFile(t.TempDir(), filepath.Join(t.TempDir(), "x.db")); err == nil {
+		t.Error("backup of an empty directory succeeded")
+	}
+	if err := BackupFile(dir, "/nonexistent-dir/x.db"); err == nil {
+		t.Error("backup to a missing directory succeeded")
+	}
+	s.Close()
+	if _, err := s.CopyTo(BackupDir, "late.db"); !errors.Is(err, ErrClosed) {
+		t.Errorf("copy on closed store: %v", err)
+	}
+	if err := s.ResetExercise(); !errors.Is(err, ErrClosed) {
+		t.Errorf("reset on closed store: %v", err)
+	}
+}
+
+// A database from before personal accounts, deadlines and read markers is
+// upgraded without making the handled history unread.
+func TestMigrationToVersion5(t *testing.T) {
+	dir := t.TempDir()
+	saved := migrations
+	migrations = saved[:4]
+	s, err := Open(dir)
+	migrations = saved
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO users (id, username, display_name, role, pass_hash, created) VALUES ('l1','leader','L','leader','x',1)`,
+		`INSERT INTO requests (id, subject, body, template_id, recipients, created_by, created) VALUES ('q1','s','b','t1','null','l1',1)`,
+		`INSERT INTO reports (id, ts, sender_id, sender_name, subject, content, receiver_id, receiver_name, template_id, template_name, fields, request_id, status, folder, search_text)
+			VALUES ('r1',1,'g1','A','old read','c','leader','L','','','null','','read','','x'), ('r2',2,'g1','A','old new','c','leader','L','','','null','','new','','x')`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Close()
+	s2 := open(t, dir)
+	rs := s2.Reports(&model.ReportFilter{ReceiverID: "leader", ViewerID: "l1"})
+	model.SortReports(rs, model.SortTime, false)
+	if len(rs) != 2 || rs[0].Unseen || !rs[1].Unseen || rs[0].AuthorID != "" || rs[0].AssigneeID != "" {
+		t.Errorf("after upgrade: %+v", rs)
+	}
+	if q, _ := s2.Request("q1"); !q.Due.IsZero() {
+		t.Error("old request gained a deadline")
+	}
+	if u, _ := s2.User("l1"); u.GroupID != "" {
+		t.Error("old user gained a group")
+	}
 }

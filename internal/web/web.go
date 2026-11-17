@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	_ "time/tzdata" // the sandbox hides /usr/share/zoneinfo; carry our own
 
 	"github.com/rom/gr_report/internal/auth"
 	"github.com/rom/gr_report/internal/i18n"
@@ -74,6 +76,7 @@ func validTheme(name string) bool {
 const (
 	langCookie  = "gr_lang"
 	themeCookie = "gr_theme"
+	zoneCookie  = "gr_tz"
 )
 
 // Server holds the dependencies of the HTTP handlers.
@@ -92,6 +95,8 @@ type Server struct {
 	// DefaultLang is used when neither a cookie nor the browser's
 	// Accept-Language header selects a supported language.
 	DefaultLang i18n.Lang
+	// DefaultZone is the time zone used until a user chooses one (nil: UTC).
+	DefaultZone *time.Location
 	// Chat enables the chat between the participants.
 	Chat bool
 	// ChatOversight lets the exercise leaders read group-to-group messages
@@ -121,15 +126,49 @@ func New(st *store.Store, log *slog.Logger, secure bool) *Server {
 	return s
 }
 
-func fmtTime(t time.Time) string {
+func fmtTime(t time.Time) string { return fmtTimeIn(t, time.UTC) }
+
+// fmtTimeIn formats a time in a time zone: with the suffix Z in UTC,
+// otherwise with the zone's abbreviation, so a time is never ambiguous.
+func fmtTimeIn(t time.Time, loc *time.Location) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.UTC().Format("2006-01-02 15:04:05") + "Z"
+	if loc == nil || loc == time.UTC {
+		return t.UTC().Format("2006-01-02 15:04:05") + "Z"
+	}
+	return t.In(loc).Format("2006-01-02 15:04:05 MST")
+}
+
+// fmtSize formats a file size for people.
+func fmtSize(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.0f kB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%d B", n)
+}
+
+// loadZone resolves an IANA time zone name chosen by a user or operator.
+// The time zone database is compiled into the binary.
+func loadZone(name string) (*time.Location, bool) {
+	if name == "" || name == "Local" || len(name) > 64 {
+		return nil, false
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, false
+	}
+	if name == "UTC" {
+		return time.UTC, true
+	}
+	return loc, true
 }
 
 func parsePages() map[string]*template.Template {
-	funcs := template.FuncMap{"ts": fmtTime, "join": strings.Join, "inc": func(i int) int { return i + 1 }}
+	funcs := template.FuncMap{"join": strings.Join, "size": fmtSize, "inc": func(i int) int { return i + 1 }}
 	entries, err := fs.Glob(templateFS, "templates/*.html")
 	if err != nil {
 		panic(err)
@@ -155,10 +194,18 @@ type reqCtx struct {
 	token  string
 	lang   i18n.Lang
 	theme  string
+	loc    *time.Location // the user's time zone
+	// party is who the user acts as (see model.User.Party) and group the
+	// group account behind it; for a shared group login that is the user.
+	party string
+	group model.User
 }
 
 // t translates a message into the language of the request.
 func (c *reqCtx) t(key string, args ...any) string { return i18n.T(c.lang, key, args...) }
+
+// ts formats a time in the user's time zone.
+func (c *reqCtx) ts(t time.Time) string { return fmtTimeIn(t, c.loc) }
 
 type handler func(c *reqCtx)
 
@@ -176,7 +223,20 @@ type page struct {
 	Chat     bool // show the chat in the navigation
 	ChatNew  int  // unread chat messages
 	Refresh  int
+	Loc      *time.Location
+	Group    string // name of the group a personal account belongs to
 	Data     any
+}
+
+// TS formats a time in the time zone of the page.
+func (p *page) TS(t time.Time) string { return fmtTimeIn(t, p.Loc) }
+
+// Zone returns the name of the time zone of the page.
+func (p *page) Zone() string {
+	if p.Loc == nil {
+		return "UTC"
+	}
+	return p.Loc.String()
 }
 
 // T translates a message into the language of the page.
@@ -224,6 +284,15 @@ func (s *Server) prefs(r *http.Request) (i18n.Lang, string) {
 func (s *Server) newCtx(w http.ResponseWriter, r *http.Request) *reqCtx {
 	c := &reqCtx{w: w, r: r}
 	c.lang, c.theme = s.prefs(r)
+	c.loc = s.DefaultZone
+	if c.loc == nil {
+		c.loc = time.UTC
+	}
+	if ck, err := r.Cookie(zoneCookie); err == nil {
+		if loc, ok := loadZone(ck.Value); ok {
+			c.loc = loc
+		}
+	}
 	return c
 }
 
@@ -328,7 +397,13 @@ func (s *Server) session(c *reqCtx) bool {
 		s.Sessions.Delete(c.token)
 		return false
 	}
+	group, ok := s.groupOf(&user)
+	if !ok {
+		s.Sessions.Delete(c.token)
+		return false
+	}
 	c.sess, c.user, c.authed = sess, user, true
+	c.party, c.group = user.Party(), group
 	return true
 }
 
@@ -381,17 +456,24 @@ func (s *Server) authed(h handler, roles ...model.Role) http.HandlerFunc {
 	}
 }
 
+// groupOf returns the group account behind a user with the group role:
+// the user itself for a shared login, the group's account for a member. It
+// fails for a member whose group is missing or disabled, which blocks the
+// member too.
+func (s *Server) groupOf(u *model.User) (model.User, bool) {
+	if u.Role != model.RoleGroup || u.GroupID == "" {
+		return *u, true
+	}
+	g, ok := s.Store.User(u.GroupID)
+	if !ok || g.Disabled || g.Role != model.RoleGroup || g.GroupID != "" {
+		return model.User{}, false
+	}
+	return g, true
+}
+
 // queueID returns the receiver ID of the queue the user works on: leaders
 // share one queue, each group has its own inbox.
-func queueID(u *model.User) string {
-	switch u.Role {
-	case model.RoleLeader:
-		return model.ReceiverLeader
-	case model.RoleGroup:
-		return u.ID
-	}
-	return ""
-}
+func queueID(u *model.User) string { return u.Party() }
 
 func (s *Server) write(w http.ResponseWriter, status int, name string, p *page) {
 	var buf bytes.Buffer
@@ -408,7 +490,10 @@ func (s *Server) write(w http.ResponseWriter, status int, name string, p *page) 
 
 // render writes a page. It works for anonymous requests too.
 func (s *Server) render(c *reqCtx, status int, name, title string, data any, errMsg string) {
-	p := &page{Title: title, Lang: c.lang, Theme: c.theme, Path: c.r.URL.Path, Error: errMsg, Data: data}
+	p := &page{Title: title, Lang: c.lang, Theme: c.theme, Path: c.r.URL.Path, Error: errMsg, Data: data, Loc: c.loc}
+	if c.authed && c.user.GroupID != "" {
+		p.Group = c.group.DisplayName
+	}
 	if c.authed {
 		p.User, p.CSRF = &c.user, c.sess.CSRF
 		if status == http.StatusOK {
@@ -416,7 +501,7 @@ func (s *Server) render(c *reqCtx, status int, name, title string, data any, err
 		}
 		// Not on a server error page: the database may be what failed.
 		if q := queueID(&c.user); q != "" && status < http.StatusInternalServerError {
-			p.NewCount = s.Store.NewCount(q)
+			p.NewCount = s.Store.NewCount(q, c.user.ID)
 			p.Chat, p.ChatNew = s.Chat, s.chatUnreadTotal(&c.user)
 		}
 	}
@@ -441,9 +526,32 @@ func (s *Server) storeErr(c *reqCtx, err error) bool {
 	return true
 }
 
+// audit records a security-relevant event of the current user, in the
+// system log and in the audit table that the administrator can browse.
 func (s *Server) audit(c *reqCtx, event string, attrs ...any) {
-	base := []any{"event", event, "user", c.user.Username, "role", string(c.user.Role), "ip", clientIP(c.r)}
-	s.Log.Info("audit", append(base, attrs...)...)
+	s.auditEvent(c.r, slog.LevelInfo, event, c.user.Username, string(c.user.Role), attrs...)
+}
+
+// auditEvent is audit for events without a logged-in user (failed logins).
+// attrs are key/value pairs; they must never contain secrets or content.
+func (s *Server) auditEvent(r *http.Request, level slog.Level, event, user, role string, attrs ...any) {
+	ip := clientIP(r)
+	base := []any{"event", event, "user", user, "role", role, "ip", ip}
+	s.Log.Log(r.Context(), level, "audit", append(base, attrs...)...)
+	var detail strings.Builder
+	for i := 0; i+1 < len(attrs); i += 2 {
+		if detail.Len() > 0 {
+			detail.WriteByte(' ')
+		}
+		fmt.Fprintf(&detail, "%v=%v", attrs[i], attrs[i+1])
+	}
+	// The database may be what is failing; the system log has the event.
+	func() {
+		defer func() { _ = recover() }()
+		if err := s.Store.AddAudit(model.AuditEntry{Time: s.Now().UTC(), User: user, Role: role, IP: ip, Event: event, Detail: detail.String()}); err != nil {
+			s.Log.Error("audit log", "err", err)
+		}
+	}()
 }
 
 func (s *Server) redirect(c *reqCtx, to, flash string) {
@@ -493,6 +601,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /queue/bulk", s.authed(s.queueBulk, group, leader))
 	mux.HandleFunc("GET /sent", s.authed(s.sent, group))
 	mux.HandleFunc("GET /api/new-count", s.authed(s.newCount, group, leader))
+	mux.HandleFunc("GET /queue/export.csv", s.authed(s.queueExport, group, leader))
+	mux.HandleFunc("GET /sent/export.csv", s.authed(s.sentExport, group))
+	mux.HandleFunc("POST /queue/filters", s.authed(s.filterSave, group, leader))
+	mux.HandleFunc("POST /queue/filters/{id}/delete", s.authed(s.filterDelete, group, leader))
+	mux.HandleFunc("POST /reports/{id}/assign", s.authed(s.reportAssign, leader))
+	mux.HandleFunc("POST /drafts/{id}/delete", s.authed(s.draftDelete, group))
 
 	mux.HandleFunc("GET /chat", s.authed(s.chatEnabled(s.chatRoot), group, leader))
 	mux.HandleFunc("GET /chat/{peer}", s.authed(s.chatEnabled(s.chat), group, leader))
@@ -507,6 +621,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /requests", s.authed(s.requestCreate, leader))
 	mux.HandleFunc("GET /requests/{id}", s.authed(s.requestView, group, leader))
 	mux.HandleFunc("POST /requests/{id}/close", s.authed(s.requestClose, leader))
+	mux.HandleFunc("POST /requests/{id}/due", s.authed(s.requestDue, leader))
 
 	mux.HandleFunc("GET /templates", s.authed(s.templates, leader, admin))
 	mux.HandleFunc("GET /templates/new", s.authed(s.templateForm, leader, admin))
@@ -518,6 +633,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/users", s.authed(s.users, admin))
 	mux.HandleFunc("POST /admin/users", s.authed(s.userCreate, admin))
 	mux.HandleFunc("POST /admin/users/{id}", s.authed(s.userUpdate, admin))
+	mux.HandleFunc("GET /admin/users/import", s.authed(s.importForm, admin))
+	mux.HandleFunc("POST /admin/users/import", s.authed(s.importCreate, admin))
+	mux.HandleFunc("GET /admin/audit", s.authed(s.auditLog, admin))
+	mux.HandleFunc("GET /admin/backup", s.authed(s.backupPage, admin))
+	mux.HandleFunc("POST /admin/backup", s.authed(s.backupCreate, admin))
+	mux.HandleFunc("GET /exercise", s.authed(s.exercise, leader, admin))
+	mux.HandleFunc("POST /exercise/reset", s.authed(s.exerciseReset, leader, admin))
 
 	return s.headers(mux)
 }
@@ -539,7 +661,7 @@ func (s *Server) root(c *reqCtx) {
 func (s *Server) newCount(c *reqCtx) {
 	c.w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(c.w).Encode(map[string]int{
-		"new": s.Store.NewCount(queueID(&c.user)), "chat": s.chatUnreadTotal(&c.user)})
+		"new": s.Store.NewCount(c.party, c.user.ID), "chat": s.chatUnreadTotal(&c.user)})
 }
 
 // ---- language and theme ----
@@ -547,10 +669,18 @@ func (s *Server) newCount(c *reqCtx) {
 type settingsView struct {
 	Languages []i18n.Lang
 	Themes    []Theme
+	Zones     []string
 }
 
+// commonZones are offered as suggestions; any IANA name is accepted.
+var commonZones = []string{"UTC", "Europe/Stockholm", "Europe/Helsinki", "Europe/Oslo", "Europe/Copenhagen", "Europe/London",
+	"Europe/Berlin", "Europe/Paris", "Europe/Madrid", "Europe/Rome", "Europe/Warsaw", "Europe/Athens", "Europe/Kyiv",
+	"Europe/Istanbul", "Atlantic/Reykjavik", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+	"America/Sao_Paulo", "Africa/Johannesburg", "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo",
+	"Australia/Sydney", "Pacific/Auckland"}
+
 func (s *Server) settingsForm(c *reqCtx) {
-	s.render(c, http.StatusOK, "settings", c.t("Settings"), &settingsView{Languages: i18n.Languages, Themes: Themes}, "")
+	s.render(c, http.StatusOK, "settings", c.t("Settings"), &settingsView{Languages: i18n.Languages, Themes: Themes, Zones: commonZones}, "")
 }
 
 func (s *Server) settingsSave(c *reqCtx) {
@@ -565,6 +695,11 @@ func (s *Server) settingsSave(c *reqCtx) {
 	}
 	if th := f.Get("theme"); validTheme(th) {
 		set(themeCookie, th)
+	}
+	if tz := strings.TrimSpace(f.Get("tz")); tz != "" {
+		if _, ok := loadZone(tz); ok {
+			set(zoneCookie, tz)
+		}
 	}
 	if c.authed {
 		s.Sessions.SetFlash(c.token, c.t("Settings saved."))

@@ -11,6 +11,7 @@ linters:
         - syscall.Close
         - (*database/sql.Rows).Close
         - (*database/sql.DB).Close
+        - (*net/http.Server).Close
         - os.Remove
         - fmt.Fprintln
         - fmt.Fprint
