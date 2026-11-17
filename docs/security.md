@@ -24,7 +24,12 @@
 | A participant reading or changing another group's data | Role check on every route, object-level check on every report and request, queue actions limited to the user's own queue |
 | Forged sender or time | Both are taken from the session and the server clock, never from the form – for reports and chat messages alike |
 | Reading someone else's chat | A conversation is derived from the requester's own party and the peer in the URL; a conversation one is not part of cannot be named |
-| Covert reading of group chat by the exercise leader | Oversight is off by default, set only by the server operator, announced in every affected conversation and on every affected message, never retroactive, read-only, and logged per look |
+| Covert reading of group chat by the exercise leader | Oversight is off by default; switching it (by the leader, or only by the operator if the switch is locked) is logged; it is announced in every affected conversation, live in open pages, and on every affected message; a message written before the writer could see the notice is held back, not sent; it is never retroactive, read-only, and logged per look |
+| Spreadsheet formula injection through an export | Cells that begin with `=`, `+`, `-`, `@`, tab or carriage return are prefixed with an apostrophe |
+| Losing an exercise by a mistaken reset | The reset needs a typed confirmation and writes an archive first; if the archive fails nothing is deleted |
+| Exercise content leaving through a backup | Backups and archives stay on the server (mode 0600) and are not served by the web interface |
+| A member of a group passing as another | Author and group come from the session; a member cannot be addressed or impersonated as a party |
+| Open redirect through the HTTP listener | It only ever redirects to `https://` on the host of the request, and refuses hosts that are not plain names or addresses |
 | Chat flooding | 20 messages per user per minute, 2 000 characters per message, the general request limits |
 | Script injection through chat | Messages are escaped by the template; the script appends new ones with `textContent` only |
 | Resource exhaustion | Request body limit 256 KiB, header limit 32 KiB, read/write/idle time-outs, field length limits, bounded session and throttle tables, `MemoryMax`/`TasksMax` in the unit |
@@ -40,7 +45,7 @@ of service by flooding the network, and compromised participant devices.
 
 | Action | group | leader | admin |
 | --- | --- | --- | --- |
-| Write a report, answer a request | ✔ | | |
+| Write a report, answer a request, keep drafts (own only) | ✔ | | |
 | Read a report | own sent / received | all | |
 | Change status / folder of a report | own inbox | leader queue | |
 | Send and close requests | | ✔ | |
@@ -48,12 +53,17 @@ of service by flooding the network, and compromised participant devices.
 | Chat: direct conversation | own group's | those with the leader | |
 | Chat: read a conversation between two groups | | only with oversight on, read-only, only messages sent under oversight | |
 | Create, edit, archive templates | | ✔ | ✔ |
+| Assign reports to a leader | | ✔ | |
+| Export reports as CSV | own inbox and sent | leader queue | |
+| Start a new exercise (archive and reset) | | ✔ | ✔ |
+| Make and list backups; read the audit log | | | ✔ |
 | Manage accounts | | | ✔ |
 
 The administrator deliberately has no access to reports or chat. The
 exercise leader cannot read a direct conversation between two groups
-([ADR 0016](adr/0016-chat.md)) unless the operator has switched oversight
-on, in which case the groups are told in the conversation and on every
+([ADR 0016](adr/0016-chat.md)) unless oversight has been switched on – by
+the exercise leader, or by the operator alone when the switch is locked
+([ADR 0019](adr/0019-oversight-switch.md)) – in which case the groups are told in the conversation and on every
 affected message, earlier messages stay private, and each look is logged
 ([ADR 0017](adr/0017-chat-oversight.md)).
 
@@ -168,8 +178,14 @@ exists, so no program can be started.
 ## Known limitations
 
 * Sessions live in memory: a restart logs everyone out.
-* Group accounts are shared by the members of a group; there is no
-  per-person accountability inside a group.
+* A group's shared login gives no per-person accountability; personal
+  accounts for its members do ([ADR 0020](adr/0020-personal-accounts.md)).
+* Backups and archives are as sensitive as the database and lie next to
+  it; automatic backups do not protect against losing the disk.
+* The audit log in the database can be altered by whoever can write the
+  database; the system log is the independent copy.
+* Desktop notifications appear on lock screens and shared displays; they
+  therefore say only that something arrived.
 * Login CSRF is prevented by the origin check and `SameSite` only (there is
   no session to bind a token to before login).
 * The client address used for throttling is the TCP peer. Behind a reverse

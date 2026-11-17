@@ -3,8 +3,9 @@
 <h1>{{$d.Req.Subject}}</h1>
 <div class="panel">
   <dl class="meta">
-    <dt>{{$.T "Sent"}}</dt><dd>{{ts $d.Req.Created}}</dd>
+    <dt>{{$.T "Sent"}}</dt><dd>{{$.TS $d.Req.Created}}</dd>
     <dt>{{$.T "Report template"}}</dt><dd>{{$d.Template.Name}}</dd>
+    <dt>{{$.T "Deadline"}}</dt><dd>{{if $d.Req.Due.IsZero}}{{$.T "none"}}{{else}}{{$.TS $d.Req.Due}}{{if $d.Overdue}} <span class="tag new">{{$.T "overdue"}}</span>{{end}}{{end}}</dd>
     <dt>{{$.T "State"}}</dt><dd>{{if $d.Req.Closed}}{{$.T "closed"}}{{else}}{{$.T "open"}}{{end}}</dd>
   </dl>
   {{if $d.Req.Body}}<h2>{{$.T "Question / information requested"}}</h2><div class="body">{{$d.Req.Body}}</div>{{end}}
@@ -22,11 +23,18 @@
   </div>
 </div>
 {{if $d.Leader}}
+<form class="panel bulk" method="post" action="/requests/{{$d.Req.ID}}/due">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <label class="inline" for="due">{{$.T "Deadline"}}</label>
+  <input type="datetime-local" id="due" name="due" value="{{$d.Due}}" aria-describedby="due-help">
+  <button class="plain">{{$.T "Set deadline"}}</button>
+  <span class="help" id="due-help">{{$.T "Leave empty for no deadline. Time zone: %s." $.Zone}}</span>
+</form>
 <h2 id="h-recipients">{{$.T "Recipients"}}</h2>
 <div class="scroll"><table aria-labelledby="h-recipients">
   <thead><tr><th scope="col">{{$.T "Group"}}</th><th scope="col">{{$.T "Responses"}}</th></tr></thead>
   <tbody>
-  {{range $d.Recipients}}<tr><td>{{.Name}}</td><td>{{if .Count}}{{.Count}}{{else}}<span class="tag new">{{$.T "none"}}</span>{{end}}</td></tr>
+  {{range $d.Recipients}}<tr><td>{{.Name}}</td><td>{{if .Count}}{{.Count}}{{else}}<span class="tag new">{{$.T "none"}}</span>{{if .Overdue}} <span class="tag new">{{$.T "overdue"}}</span>{{end}}{{end}}</td></tr>
   {{else}}<tr><td colspan="2" class="muted">{{$.T "No groups."}}</td></tr>{{end}}
   </tbody>
 </table></div>
@@ -36,7 +44,7 @@
   <thead><tr><th scope="col">{{$.T "Time"}}</th><th scope="col">{{$.T "From"}}</th><th scope="col">{{$.T "Subject"}}</th><th scope="col">{{$.T "Status"}}</th></tr></thead>
   <tbody>
   {{range $d.Responses}}
-  <tr><td>{{ts .Timestamp}}</td><td>{{.SenderName}}</td><td><a href="/reports/{{.ID}}">{{.Subject}}</a></td><td><span class="tag {{.Status}}">{{$.Tr .Status}}</span></td></tr>
+  <tr><td>{{$.TS .Timestamp}}{{if .Late}} <span class="tag new">{{$.T "after the deadline"}}</span>{{end}}</td><td>{{.SenderName}}{{if .AuthorName}} <span class="muted">({{.AuthorName}})</span>{{end}}</td><td><a href="/reports/{{.ID}}">{{.Subject}}</a></td><td><span class="tag {{.Status}}">{{$.Tr .Status}}</span></td></tr>
   {{else}}<tr><td colspan="4" class="muted">{{$.T "No responses yet."}}</td></tr>{{end}}
   </tbody>
 </table></div>

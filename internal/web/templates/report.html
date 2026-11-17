@@ -3,17 +3,20 @@
 <h1>{{$r.Subject}}</h1>
 <div class="panel">
   <dl class="meta">
-    <dt>{{$.T "Time"}}</dt><dd>{{ts $r.Timestamp}}</dd>
+    <dt>{{$.T "Time"}}</dt><dd>{{$.TS $r.Timestamp}}{{if .Data.Late}} <span class="tag new">{{$.T "after the deadline"}}</span>{{end}}</dd>
     <dt>{{$.T "From"}}</dt><dd>{{$r.SenderName}}</dd>
+    {{if $r.AuthorName}}<dt>{{$.T "Written by"}}</dt><dd>{{$r.AuthorName}}</dd>{{end}}
     <dt>{{$.T "To"}}</dt><dd>{{if eq $r.ReceiverID "leader"}}{{$.T "Exercise leader"}}{{else}}{{$r.ReceiverName}}{{end}}</dd>
     <dt>{{$.T "Subject"}}</dt><dd>{{$r.Subject}}</dd>
     <dt>{{$.T "Template"}}</dt><dd>{{$r.TemplateName}}</dd>
     {{if .Data.Request}}<dt>{{$.T "Answers request"}}</dt><dd><a href="/requests/{{.Data.Request.ID}}">{{.Data.Request.Subject}}</a></dd>{{end}}
     <dt>{{$.T "Status"}}</dt><dd><span class="tag {{$r.Status}}">{{$.Tr $r.Status}}</span>{{if $r.Folder}} {{$.T "in folder"}} <strong>{{$r.Folder}}</strong>{{end}}</dd>
+    {{if $r.AssigneeName}}<dt>{{$.T "Assigned to"}}</dt><dd>{{$r.AssigneeName}}</dd>{{end}}
     {{range $r.Fields}}<dt>{{.Label}}</dt><dd class="body">{{if eq .Value "yes"}}{{$.T "yes"}}{{else if eq .Value "no"}}{{$.T "no"}}{{else}}{{.Value}}{{end}}</dd>{{end}}
   </dl>
   <h2>{{$.T "Content"}}</h2>
   <div class="body">{{$r.Content}}</div>
+  <div class="actions"><button type="button" class="plain" id="print" data-js-show hidden>{{$.T "Print"}}</button></div>
 </div>
 {{if .Data.Mine}}
 <form class="panel bulk" method="post" action="/reports/{{$r.ID}}/status">
@@ -25,6 +28,17 @@
   {{if eq $r.Status "filed"}}<button class="plain" name="action" value="read">{{$.T "Back to queue"}}</button>{{end}}
   <button class="plain" name="action" value="new">{{$.T "Mark as new"}}</button>
 </form>
+{{if .Data.Leaders}}
+<form class="panel bulk" method="post" action="/reports/{{$r.ID}}/assign">
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <label class="inline" for="assignee">{{$.T "Assigned to"}}</label>
+  <select id="assignee" name="assignee">
+    <option value="">{{$.T "nobody"}}</option>
+    {{range .Data.Leaders}}<option value="{{.ID}}"{{if eq .ID $r.AssigneeID}} selected{{end}}>{{.DisplayName}}</option>{{end}}
+  </select>
+  <button class="plain">{{$.T "Assign"}}</button>
+</form>
+{{end}}
 <p><a href="/queue?group={{$r.SenderID}}">{{$.T "Queue for %s" $r.SenderName}}</a> · <a href="/queue">{{$.T "All queues"}}</a></p>
 {{else if eq .User.Role "group"}}
 <p><a href="/sent">{{$.T "Sent reports"}}</a></p>

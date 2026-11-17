@@ -27,10 +27,10 @@ per-package and total statement coverage and **fails below 85 %**
 | `internal/store` | Unit with real database files | CRUD, ordering, persistence across reopen, directory lock, schema version and migration rollback, refusal of non-database files, search including Swedish letters and `LIKE` wildcards, loud failure on closed or damaged data |
 | `internal/i18n` | Unit + source scan | Translation, fallback, nested messages, `Accept-Language` matching; **every message used in the code has a Swedish translation, none is unused, format verbs match** |
 | `internal/auth` | Unit with fake clock | Argon2id hash format, the reference test vector, parameter bounds, PBKDF2 compatibility and rehash decision, concurrency limit, policy, session idle/absolute expiry, eviction, flash, throttling back-off and bounds |
-| `internal/web` | Integration over HTTP (`httptest`) with a real store | Login/logout, cookie attributes, security headers, throttling, CSRF and origin checks, role matrix for every route, object-level access, the full report / queue / request / template / account flows (also in Swedish), language and theme selection, chat (who can read what, unread counters, paging, polling, rate limit, switch-off; oversight: notice, per-message tag, not retroactive, read-only, live polling, off again), escaping of hostile input, body limit, stale sessions, write failure, read failure; **accessibility audit of every page**; **contrast ratios of every theme** |
+| `internal/web` | Integration over HTTP (`httptest`) with a real store | Login/logout, cookie attributes, security headers, throttling, CSRF and origin checks, role matrix for every route, object-level access, the full report / queue / request / template / account flows (also in Swedish), language and theme selection, chat (who can read what, unread counters, paging, polling, rate limit, switch-off; oversight: notice, per-message tag, not retroactive, read-only, live polling, off again; the switch: who may use it, persistence, operator lock, messages held back after a flip), escaping of hostile input, body limit, stale sessions, write failure, read failure; **accessibility audit of every page**; **contrast ratios of every theme** |
 | `internal/app` | Integration | Configuration file (strict parsing, precedence over defaults and under environment and flags, relative paths, round trip of the rendered configuration, the shipped file), flag and environment parsing, first-run bootstrap, HTTP and TLS serving, TLS minimum version, certificate reload (good and broken), start-up errors, graceful shutdown |
 | `internal/sandbox` | Unit + child process | BPF program against an interpreter; **enforcement**: a child applies the sandbox and tries exec, sockets, connect, ptrace, setuid, forbidden reads and writes; strict mode; in-process apply |
-| `cmd/gr_report` | Unit + end-to-end | Exit codes; builds the binary, runs it from a YAML configuration file with TLS and the sandbox, logs in, writes, reloads the certificate with SIGHUP, shuts down with SIGTERM |
+| `cmd/gr_report` | Unit + end-to-end | Exit codes; builds the binary, runs it from a YAML configuration file with TLS and the sandbox, makes a backup, an archive-and-reset and a command line backup under the sandbox, logs in, writes, reloads the certificate with SIGHUP, shuts down with SIGTERM |
 
 The role matrix in `TestRoleAccess` is the checklist for authorisation:
 every new route belongs in it.
@@ -94,8 +94,9 @@ These are ordinary Go tests and run in `make test` and `make cover`.
 * SELinux and AppArmor in enforcing mode.
 * Let's Encrypt issuance (`mkcert-letsencrypt.sh` needs a public host).
 * The page script (`app.js`) and visual layout in browsers. They were
-  exercised by hand: new-report notice, select-all, add-field, theme
-  preview, live chat between three browsers, each theme, system dark and increased-contrast detection, the
+  exercised by hand, which is how a bug in background draft saving was
+  found that no Go test could see: new-report notice, select-all, add-field, theme
+  preview, live chat between three browsers, live queue with ticks kept, background saving and restoring of a draft, a desktop notification on a new report, time zone detection, each theme, system dark and increased-contrast detection, the
   skip link, and operation with JavaScript disabled.
 * The experience with a screen reader, and a scan with a browser-based
   accessibility checker such as axe.

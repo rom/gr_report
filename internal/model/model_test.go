@@ -336,3 +336,66 @@ func TestParseDay(t *testing.T) {
 		t.Error("invalid day accepted")
 	}
 }
+
+func TestPartyOverdueAndAssigneeFilter(t *testing.T) {
+	group := User{ID: "g1", Role: RoleGroup}
+	member := User{ID: "p1", Role: RoleGroup, GroupID: "g1"}
+	leader := User{ID: "l1", Role: RoleLeader}
+	admin := User{ID: "a1", Role: RoleAdmin}
+	if group.Party() != "g1" || member.Party() != "g1" || leader.Party() != ReceiverLeader || admin.Party() != "" {
+		t.Error("Party")
+	}
+	if group.Personal() || !member.Personal() || !leader.Personal() || !admin.Personal() {
+		t.Error("Personal")
+	}
+	if ChatParty(&member) != "g1" {
+		t.Error("ChatParty follows Party")
+	}
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	q := Request{Due: now}
+	if q.Overdue(now) || !q.Overdue(now.Add(time.Second)) || (&Request{}).Overdue(now) {
+		t.Error("Overdue")
+	}
+	q.Closed = true
+	if q.Overdue(now.Add(time.Hour)) {
+		t.Error("closed request overdue")
+	}
+	rs := []Report{{ID: "a", AssigneeID: "l1", AuthorName: "Anna Åkesson"}, {ID: "b"}, {ID: "c", AssigneeID: "l2"}}
+	match := func(f ReportFilter) string {
+		f.Prepare()
+		out := ""
+		for i := range rs {
+			if f.Match(&rs[i]) {
+				out += rs[i].ID
+			}
+		}
+		return out
+	}
+	if got := match(ReportFilter{AssigneeID: "l1"}); got != "a" {
+		t.Errorf("assignee l1 = %q", got)
+	}
+	if got := match(ReportFilter{AssigneeID: AssigneeNone}); got != "b" {
+		t.Errorf("unassigned = %q", got)
+	}
+	if got := match(ReportFilter{Query: "ÅKESSON"}); got != "a" {
+		t.Errorf("author search = %q", got)
+	}
+	if got := match(ReportFilter{ViewerID: "x", UnseenOnly: true}); got != "abc" {
+		t.Errorf("viewer fields must not affect Match: %q", got)
+	}
+	if body, err := CleanChat(" hi\r\nthere "); err != nil || body != "hi\nthere" {
+		t.Errorf("CleanChat = %q, %v", body, err)
+	}
+	if _, err := CleanChat("  "); err == nil {
+		t.Error("empty chat message accepted")
+	}
+	if _, err := CleanChat(strings.Repeat("x", MaxChatLen+1)); err == nil {
+		t.Error("oversized chat message accepted")
+	}
+	if conv, a, b := ChatConv("g2", "g1"); conv != "g1|g2" || a != "g1" || b != "g2" {
+		t.Errorf("ChatConv = %q %q %q", conv, a, b)
+	}
+	if conv, a, b := ChatConv("g1", ChatAll); conv != ChatAll || a != "" || b != "" {
+		t.Errorf("ChatConv all = %q %q %q", conv, a, b)
+	}
+}

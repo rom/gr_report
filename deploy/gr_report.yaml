@@ -17,6 +17,12 @@
 # Default: ":8443"
 listen: ":8443"
 
+# A second address that serves plain HTTP only to redirect browsers to the
+# HTTPS address above, so that typing the host name without https:// works.
+# Port 80 needs deploy/systemd/low-port.conf.
+# Default: "" (no redirect)
+redirect_http: ""
+
 # Directory for the database, the lock file and the initial administrator
 # password. A relative path is relative to this file.
 # Default: "./data"
@@ -37,6 +43,22 @@ tls:
 # Default: en
 language: en
 
+# Time zone in which times are shown until a user chooses another under
+# Settings: an IANA name such as Europe/Stockholm, or UTC.
+# Default: UTC
+timezone: UTC
+
+backup:
+  # Make a backup automatically this often, for example 30m or 6h; 0 for
+  # never. Backups are written to the "backups" folder of data_dir and can
+  # also be made by an administrator in the user interface, or from the
+  # command line with: gr_report -config FILE -backup /path/to/copy.db
+  # Default: 0
+  interval: 1h
+  # Number of automatic backups to keep; older ones are removed.
+  # Default: 10
+  keep: 24
+
 chat:
   # Chat between the participants.
   # Default: true
@@ -47,6 +69,13 @@ chat:
   # starts if you want it from the beginning.
   # Default: false
   oversight: false
+  # Let the exercise leader switch oversight on and off on the chat page.
+  # The choice is then stored in the database and survives restarts;
+  # "oversight" above is only the state until the switch is first used.
+  # Set this to false to make "oversight" above final: the switch
+  # disappears and anything chosen with it earlier is ignored.
+  # Default: true
+  oversight_toggle: true
 
 # In-process sandbox (Landlock, seccomp, capabilities): auto, strict or off.
 #   strict  refuse to start unless every mechanism is active (Linux >= 6.7)

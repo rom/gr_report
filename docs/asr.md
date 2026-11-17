@@ -16,7 +16,16 @@ and how it is verified.
 | F-6 | The leader has a queue of incoming reports and can filter, sort, search and file them; by default one queue per group | Queue view with per-sender queues, `ReportFilter`, `SortReports`, status and folder | `TestReportFlow`, `TestQueuePagination`, `TestFilter`, `TestSort` |
 
 | F-7 | Participants can chat with each other (added in a later iteration) | Shared conversation plus direct conversations between parties, stored in SQLite, polled by the page ([ADR 0016](adr/0016-chat.md)) | `TestChatFlow`, `TestChatPollAndPaging`, `TestChatRateLimit`, `TestChat` (store) |
-| F-8 | The exercise leader can oversee chat between groups, as a setting that participants can see (added in a later iteration) | Operator setting; notice and per-message tag; only messages sent under oversight are shown, read-only ([ADR 0017](adr/0017-chat-oversight.md)) | `TestChatOversight`, `TestMigrationFromEarlierVersion` |
+| F-8 | The exercise leader can oversee chat between groups, as a setting that participants can see (added in a later iteration) | Operator setting; notice and per-message tag; only messages sent under oversight are shown, read-only ([ADR 0017](adr/0017-chat-oversight.md)) | `TestChatOversight`, `TestChatOversightSwitch`, `TestMigrationFromEarlierVersion` |
+| F-9 | Personal accounts associated with a group | Members act as the group and are recorded as authors ([ADR 0020](adr/0020-personal-accounts.md)) | `TestPersonalAccounts`, `TestGroupsAndMembers` |
+| F-10 | Times in local time | Per-browser time zone, server default, embedded zone data ([ADR 0023](adr/0023-time-zones.md)) | `TestTimeZones` |
+| F-11 | A leader or administrator can archive and reset to start a new exercise in the GUI | Archive copy first, then reset ([ADR 0022](adr/0022-exercise-lifecycle-and-backup.md)) | `TestNewExercise`, `TestCopiesAndReset`, `TestEndToEndSandboxed` |
+| F-12 | Saved filters, assignment to a leader, per-leader read state, live queue | Seen per user, shared status and assignee, saved views, page re-fetch ([ADR 0021](adr/0021-read-state-and-assignment.md), [ADR 0026](adr/0026-live-queue-and-notifications.md)) | `TestReadStateAssignmentAndSavedFilters`, `TestSeenAndAssignment` |
+| F-13 | Deadlines on requests; drafts so unfinished reports are not lost | `due` on requests with overdue/late marks; server-side drafts with background saving ([ADR 0024](adr/0024-drafts.md)) | `TestRequestDeadlines`, `TestDrafts` |
+| F-14 | Bulk account set-up; audit log viewer | All-or-nothing import with printable passwords; audit table and page ([ADR 0025](adr/0025-audit-log-in-database.md)) | `TestBulkAccountImport`, `TestAuditLogViewer` |
+| F-15 | Export; backup | CSV of the filtered list; database copies by button, schedule and command line ([ADR 0022](adr/0022-exercise-lifecycle-and-backup.md)) | `TestExportCSV`, `TestBackupPage`, `TestRunRedirectTimeZoneAndBackups` |
+| F-16 | Desktop or sound notifications | Notifications API and generated tone, opt-in per browser ([ADR 0026](adr/0026-live-queue-and-notifications.md)) | Manual browser check; settings markup in `TestAccessibility` |
+| F-17 | HTTP-to-HTTPS redirect | Optional redirect-only listener ([ADR 0027](adr/0027-http-redirect.md)) | `TestRedirectHandler`, `TestRunRedirectTimeZoneAndBackups` |
 
 ## Quality attribute drivers
 

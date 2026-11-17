@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rom/gr_report/internal/model"
+
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 )
@@ -226,10 +228,10 @@ func problems(lang, body string) []string {
 				fail("<%s> landmark without a name [1.3.1]", n.Data)
 			}
 		}
-		if role, _ := attr(n, "role"); role == "alert" || role == "status" {
-			if textOf(n) == "" {
-				fail("empty live region")
-			}
+		// An alert must say something. A status region may start empty:
+		// it is announced when the page script puts text into it.
+		if role, _ := attr(n, "role"); role == "alert" && textOf(n) == "" {
+			fail("empty live region")
 		}
 	}
 	if h1 != 1 {
@@ -285,10 +287,19 @@ func TestAccessibility(t *testing.T) {
 	toAlpha := "/reports/" + bravo.send("Need a radio", "Can you lend us one?", "receiver", e.id["alpha"])
 	bravo.send("Arrived", "All present")
 	leader.post(sitrep+"/status", "action", "file", "folder", "Logistics")
+	alpha.post("/reports", "template", e.id["SITREP"], "action", "draft", "subject", "A draft")
+	leader.post("/queue/filters", "name", "Unread", "return", "unread=1")
+	leader.post("/queue/bulk", "id", strings.TrimPrefix(sitrep, "/reports/"), "action", "assign_me")
+	leader.post(reqPath+"/due", "due", "2020-01-01T10:00") // overdue
+	e.addUser("anna", "Anna Andersson", model.RoleGroup, e.id["alpha"])
+	anna := e.login("anna")
+	anna.send("From a member", "c")
+	admin.post("/admin/backup")
 	alpha.post("/chat/all", "body", "Hello everyone")
 	leader.post("/chat/"+e.id["alpha"], "body", "A question for Alpha")
 	e.srv.ChatOversight = true
-	bravo.post("/chat/"+e.id["alpha"], "body", "Sent under oversight")
+	e.srv.ChatOversightToggle = true
+	bravo.post("/chat/"+e.id["alpha"], "body", "Sent under oversight", "oversight_seen", "1")
 
 	pages := []struct {
 		c     *client
@@ -301,8 +312,11 @@ func TestAccessibility(t *testing.T) {
 			"/chat/all", "/chat/leader", "/chat/" + e.id["bravo"], "/chat/nope"}},
 		{leader, "leader", []string{"/queue", "/queue?sort=subject&dir=asc&q=fine&status=filed", "/queue?q=nomatch", "/queue?auto=1", sitrep, "/requests", "/requests/new", reqPath,
 			"/templates", "/templates/new", "/templates/" + e.id["SITREP"], "/settings", "/password", "/chat/all", "/chat/" + e.id["alpha"],
+			"/exercise", "/queue?assignee=me&unread=1",
 			"/chat/oversight/" + e.id["alpha"] + "/" + e.id["bravo"]}},
-		{admin, "admin", []string{"/admin/users", "/templates", "/templates/new", "/settings", "/queue"}},
+		{admin, "admin", []string{"/admin/users", "/templates", "/templates/new", "/settings", "/queue",
+			"/admin/users/import", "/admin/audit", "/admin/audit?q=nomatch", "/admin/backup", "/exercise"}},
+		{anna, "member", []string{"/home", "/queue", "/sent", "/reports/new?template=" + e.id["SITREP"], "/chat/all"}},
 	}
 	for _, lang := range []string{"en", "sv"} {
 		for _, p := range pages {
@@ -319,6 +333,10 @@ func TestAccessibility(t *testing.T) {
 		if !strings.Contains(res.body, `role="alert"`) || !strings.Contains(res.body, `aria-describedby="error"`) {
 			t.Errorf("%s: the validation error is not announced and linked to the form", lang)
 		}
+		admin.hdr = map[string]string{"Accept-Language": lang}
+		audit(t, lang+" import with errors", lang, admin.post("/admin/users/import", "accounts", "x").body)
+		audit(t, lang+" import result", lang, admin.post("/admin/users/import", "accounts", "new"+lang+"; New Group").body)
+		audit(t, lang+" reset without confirmation", lang, admin.post("/exercise/reset", "confirm", "no").body)
 		res = e.anon().postRaw("/login", url.Values{"username": {"x"}, "password": {"y"}}, map[string]string{"Accept-Language": lang})
 		audit(t, lang+" login with error", lang, res.body)
 	}

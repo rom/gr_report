@@ -1,7 +1,8 @@
 # 0017 – Leader oversight of group chat as a visible, forward-only setting
 
 * Status: Accepted (amends [0016](0016-chat.md), which made group-to-group
-  chat private without exception)
+  chat private without exception); the rule that oversight is changed only
+  in the server configuration is amended by [0019](0019-oversight-switch.md)
 * Date: 2026-11-16
 * ASRs: F-7, Q-3, Q-4
 

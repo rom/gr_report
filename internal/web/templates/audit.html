@@ -1,0 +1,21 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1 id="h-audit">{{$.T "Audit log"}}</h1>
+<p class="muted">{{$.T "Who did what and when: logins, failed logins, account changes, sent reports, queue actions, exports, oversight and resets. The log never contains passwords, report text or chat messages."}}</p>
+<form class="panel filters" method="get" action="/admin/audit" role="search" aria-label="{{$.T "Search the audit log"}}">
+  <div><label for="q">{{$.T "Search"}}</label><input type="search" id="q" name="q" value="{{$d.Q}}" maxlength="200" placeholder="{{$.T "user, event, address or detail"}}"></div>
+  <div class="actions"><button>{{$.T "Search"}}</button>{{if $d.Q}} <a href="/admin/audit">{{$.T "Clear filter"}}</a>{{end}}</div>
+</form>
+<p class="help">{{$.T "Times in %s" $.Zone}}</p>
+<div class="scroll"><table aria-labelledby="h-audit">
+  <thead><tr><th scope="col">{{$.T "Time"}}</th><th scope="col">{{$.T "User"}}</th><th scope="col">{{$.T "Role"}}</th><th scope="col">{{$.T "Event"}}</th><th scope="col">{{$.T "Detail"}}</th><th scope="col">{{$.T "Address"}}</th></tr></thead>
+  <tbody>
+  {{range $d.Entries}}
+  <tr><td>{{$.TS .Time}}</td><td>{{.User}}</td><td>{{if .Role}}{{$.Tr .Role}}{{end}}</td><td><code>{{.Event}}</code></td><td>{{.Detail}}</td><td>{{.IP}}</td></tr>
+  {{else}}
+  <tr><td colspan="6" class="muted">{{$.T "No entries."}}</td></tr>
+  {{end}}
+  </tbody>
+</table></div>
+{{if $d.OlderURL}}<nav class="pager" aria-label="{{$.T "Pages"}}"><a href="{{$d.OlderURL}}" rel="next">{{$.T "Older entries"}} →</a></nav>{{end}}
+{{end}}

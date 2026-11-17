@@ -60,7 +60,31 @@ type User struct {
 	Disabled    bool      `json:"disabled,omitempty"`
 	MustChange  bool      `json:"must_change,omitempty"`
 	Created     time.Time `json:"created"`
+	// GroupID makes this a personal account of a member of a group: it is
+	// the ID of the group's own account. Empty for the group account
+	// itself, for leaders and for administrators.
+	GroupID string `json:"group_id,omitempty"`
 }
+
+// Party returns who the user acts as in the exercise: the group (for the
+// group account and for each of its members), ReceiverLeader for the
+// exercise leaders, or "" for administrators, who take no part.
+func (u *User) Party() string {
+	switch u.Role {
+	case RoleLeader:
+		return ReceiverLeader
+	case RoleGroup:
+		if u.GroupID != "" {
+			return u.GroupID
+		}
+		return u.ID
+	}
+	return ""
+}
+
+// Personal reports whether the account belongs to one person: a leader, an
+// administrator or a member of a group, as opposed to a shared group login.
+func (u *User) Personal() bool { return u.Role != RoleGroup || u.GroupID != "" }
 
 // FieldType is the input type of a template field.
 type FieldType string
@@ -124,6 +148,14 @@ type Request struct {
 	CreatedBy  string    `json:"created_by"`
 	Created    time.Time `json:"created"`
 	Closed     bool      `json:"closed,omitempty"`
+	// Due is the optional deadline for answers (zero: none). Answers are
+	// still accepted afterwards and shown as late.
+	Due time.Time `json:"due,omitempty"`
+}
+
+// Overdue reports whether the deadline of an open request has passed.
+func (q *Request) Overdue(now time.Time) bool {
+	return !q.Closed && !q.Due.IsZero() && now.After(q.Due)
 }
 
 // Addressed reports whether the request is addressed to the group userID.
@@ -177,6 +209,56 @@ type Report struct {
 	RequestID    string       `json:"request_id,omitempty"`
 	Status       Status       `json:"status"`
 	Folder       string       `json:"folder,omitempty"`
+	// AuthorID and AuthorName identify the person who wrote the report
+	// when it was sent from a personal account; empty for a shared login.
+	AuthorID   string `json:"author_id,omitempty"`
+	AuthorName string `json:"author_name,omitempty"`
+	// AssigneeID and AssigneeName: the exercise leader who has taken, or
+	// been given, the report. Mutable, like Status and Folder.
+	AssigneeID   string `json:"assignee_id,omitempty"`
+	AssigneeName string `json:"assignee_name,omitempty"`
+	// Unseen is not stored with the report: a query for a particular
+	// viewer sets it when that user has not opened the report.
+	Unseen bool `json:"-"`
+}
+
+// Draft is an unsent report that its author can come back to.
+type Draft struct {
+	ID         string
+	UserID     string
+	TemplateID string
+	RequestID  string
+	Receiver   string
+	Subject    string
+	Content    string
+	Values     map[string]string // template field key -> text as typed
+	Updated    time.Time
+}
+
+// MaxDrafts bounds the number of drafts one user can keep.
+const MaxDrafts = 20
+
+// SavedFilter is a named queue view of one user. Query is the URL query
+// string of the view.
+type SavedFilter struct {
+	ID     string
+	UserID string
+	Name   string
+	Query  string
+}
+
+// MaxSavedFilters bounds the number of saved filters per user.
+const MaxSavedFilters = 30
+
+// AuditEntry is one line of the audit log.
+type AuditEntry struct {
+	Seq    int64
+	Time   time.Time
+	User   string
+	Role   string
+	IP     string
+	Event  string
+	Detail string
 }
 
 // Clone returns a deep copy of t.

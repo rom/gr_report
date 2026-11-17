@@ -9,7 +9,7 @@ changed decision gets a new record that supersedes the old one.
 | [0001](0001-go-standard-library-only.md) | Go with the standard library only, one static binary | Superseded by 0010 |
 | [0002](0002-server-rendered-html-no-javascript.md) | Server-rendered HTML without JavaScript | Superseded by 0011 |
 | [0003](0003-journal-storage.md) | In-memory state with an append-only JSON journal | Superseded by 0012 |
-| [0004](0004-roles-and-group-accounts.md) | Three roles, one shared account per group, one shared leader queue | Accepted |
+| [0004](0004-roles-and-group-accounts.md) | Three roles, one shared account per group, one shared leader queue | Accepted; amended by 0020, 0021 |
 | [0005](0005-authentication-and-sessions.md) | Passwords with PBKDF2, server-side in-memory sessions | Accepted; hashing superseded by 0015 |
 | [0006](0006-layered-sandbox.md) | Layered sandbox: self-confinement after start-up plus OS policy | Accepted |
 | [0007](0007-tls-by-default.md) | TLS required by default, terminated in the process | Accepted |
@@ -22,8 +22,17 @@ changed decision gets a new record that supersedes the old one.
 | [0014](0014-accessibility-and-themes.md) | WCAG 2.1 AA as the bar; themes as checked colour sets | Accepted |
 | [0015](0015-argon2id.md) | Argon2id for password hashing, PBKDF2 hashes upgraded at login | Accepted |
 | [0016](0016-chat.md) | Chat: one shared conversation plus direct conversations between parties | Accepted; amended by 0017 |
-| [0017](0017-chat-oversight.md) | Leader oversight of group chat: off by default, announced, per message, forward-only | Accepted |
-| [0018](0018-yaml-configuration.md) | One YAML configuration file for all settings; environment and flags override | Accepted |
+| [0017](0017-chat-oversight.md) | Leader oversight of group chat: off by default, announced, per message, forward-only | Accepted; amended by 0019 |
+| [0018](0018-yaml-configuration.md) | One YAML configuration file for all settings; environment and flags override | Accepted; amended by 0019 |
+| [0019](0019-oversight-switch.md) | The exercise leader can switch chat oversight in the user interface; the operator can lock it | Accepted |
+| [0020](0020-personal-accounts.md) | Personal accounts as members of a group account | Accepted |
+| [0021](0021-read-state-and-assignment.md) | Read state per person; status and assignment shared | Accepted |
+| [0022](0022-exercise-lifecycle-and-backup.md) | Archive-and-reset and backups as database copies on the server | Accepted |
+| [0023](0023-time-zones.md) | Times in the user's time zone, chosen per browser | Accepted |
+| [0024](0024-drafts.md) | Drafts kept on the server | Accepted |
+| [0025](0025-audit-log-in-database.md) | The audit log in the database, with a viewer | Accepted |
+| [0026](0026-live-queue-and-notifications.md) | Live queue by re-fetching the page; notifications in the browser | Accepted |
+| [0027](0027-http-redirect.md) | Optional plain HTTP listener that only redirects | Accepted |
 
 Template for new records:
 

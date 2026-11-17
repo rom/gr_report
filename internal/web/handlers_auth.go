@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -31,7 +32,7 @@ func (s *Server) login(c *reqCtx) {
 		key string
 	}{{s.UserLimiter, userKey}, {s.IPLimiter, ipKey}} {
 		if ok, wait := chk.l.Allowed(chk.key); !ok {
-			s.Log.Warn("audit", "event", "login_throttled", "username", username, "ip", ip)
+			s.auditEvent(r, slog.LevelWarn, "login_throttled", username, "")
 			w.Header().Set("Retry-After", fmt.Sprint(int(wait.Seconds())+1))
 			deny(http.StatusTooManyRequests, "Too many failed attempts. Try again later.")
 			return
@@ -40,10 +41,15 @@ func (s *Server) login(c *reqCtx) {
 	user, found := s.Store.UserByUsername(username)
 	// Verify always runs a key derivation, also for unknown users, so the
 	// response time does not reveal which usernames exist.
-	if !auth.Verify(user.PassHash, password) || !found || user.Disabled {
+	valid := auth.Verify(user.PassHash, password) && found && !user.Disabled
+	if valid {
+		// A member cannot log in while the group is disabled.
+		_, valid = s.groupOf(&user)
+	}
+	if !valid {
 		s.UserLimiter.Fail(userKey)
 		s.IPLimiter.Fail(ipKey)
-		s.Log.Warn("audit", "event", "login_failed", "username", username, "ip", ip)
+		s.auditEvent(r, slog.LevelWarn, "login_failed", username, "")
 		deny(http.StatusUnauthorized, "Wrong username or password.")
 		return
 	}
@@ -59,12 +65,12 @@ func (s *Server) login(c *reqCtx) {
 			if err := s.Store.PutUser(user); err != nil {
 				s.Log.Error("rehash", "user", user.Username, "err", err)
 			} else {
-				s.Log.Info("audit", "event", "password_rehashed", "user", user.Username)
+				s.auditEvent(r, slog.LevelInfo, "password_rehashed", user.Username, string(user.Role))
 			}
 		}
 	}
 	s.setCookie(w, s.Sessions.Create(user.ID), 0)
-	s.Log.Info("audit", "event", "login", "user", user.Username, "role", string(user.Role), "ip", ip)
+	s.auditEvent(r, slog.LevelInfo, "login", user.Username, string(user.Role))
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -120,15 +126,23 @@ func (s *Server) passwordChange(c *reqCtx) {
 // ---- administration of accounts ----
 
 type usersView struct {
-	Users []model.User
-	Self  string
-	Roles []model.Role
-	Form  model.User
+	Users      []model.User
+	Self       string
+	Roles      []model.Role
+	Form       model.User
+	Groups     []model.User      // groups a personal account can belong to
+	GroupNames map[string]string // group account ID -> display name
 }
 
 func (s *Server) usersPage(c *reqCtx, status int, form model.User, errMsg string) {
-	v := &usersView{Users: s.Store.Users(), Self: c.user.ID, Form: form,
+	v := &usersView{Users: s.Store.Users(), Self: c.user.ID, Form: form, GroupNames: map[string]string{},
 		Roles: []model.Role{model.RoleGroup, model.RoleLeader, model.RoleAdmin}}
+	for _, u := range v.Users {
+		if u.Role == model.RoleGroup && u.GroupID == "" {
+			v.Groups = append(v.Groups, u)
+			v.GroupNames[u.ID] = u.DisplayName
+		}
+	}
 	s.render(c, status, "users", c.t("Accounts"), v, errMsg)
 }
 
@@ -139,10 +153,18 @@ func (s *Server) users(c *reqCtx) {
 func (s *Server) userCreate(c *reqCtx) {
 	f := c.r.PostForm
 	u := model.User{ID: model.NewID(), Username: f.Get("username"), DisplayName: f.Get("display_name"),
-		Role: model.Role(f.Get("role")), MustChange: true, Created: s.Now().UTC()}
+		Role: model.Role(f.Get("role")), MustChange: true, Created: s.Now().UTC(), GroupID: f.Get("group")}
 	if err := u.Validate(); err != nil {
 		s.usersPage(c, http.StatusUnprocessableEntity, u, i18n.TErr(c.lang, err))
 		return
+	}
+	// A personal account in a group: the group must be a group account.
+	if u.GroupID != "" {
+		g, ok := s.Store.User(u.GroupID)
+		if u.Role != model.RoleGroup || !ok || g.Role != model.RoleGroup || g.GroupID != "" {
+			s.usersPage(c, http.StatusUnprocessableEntity, u, c.t("Only an account with the group role can be a member, and only of an existing group."))
+			return
+		}
 	}
 	if _, exists := s.Store.UserByUsername(u.Username); exists {
 		s.usersPage(c, http.StatusUnprocessableEntity, u, c.t("That username is already in use."))
@@ -157,7 +179,7 @@ func (s *Server) userCreate(c *reqCtx) {
 	if s.storeErr(c, s.Store.PutUser(u)) {
 		return
 	}
-	s.audit(c, "user_created", "target", u.Username, "target_role", string(u.Role))
+	s.audit(c, "user_created", "target", u.Username, "target_role", string(u.Role), "group", u.GroupID)
 	s.redirect(c, "/admin/users", c.t("Account %q created. One-time password: %s — hand it over now, it is not shown again.", u.Username, pw))
 }
 

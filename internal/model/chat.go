@@ -32,15 +32,7 @@ type ChatMessage struct {
 
 // ChatParty returns the party a user chats as, or "" when the role takes
 // no part in the exercise traffic (administrators).
-func ChatParty(u *User) string {
-	switch u.Role {
-	case RoleLeader:
-		return ReceiverLeader
-	case RoleGroup:
-		return u.ID
-	}
-	return ""
-}
+func ChatParty(u *User) string { return u.Party() }
 
 // ChatConv returns the conversation key and its two parties for a party
 // and the peer it talks to. peer is ChatAll, ReceiverLeader or a group ID.

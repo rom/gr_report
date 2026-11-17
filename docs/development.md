@@ -96,6 +96,8 @@ docs/                 documentation, ADRs
    variable, file, default) and render it in `Config.YAML`.
 2. Add it, with a comment and its default, to `deploy/gr_report.yaml`;
    `TestShippedConfigFile` fails while a setting is missing there.
+   (A setting that users change at run time goes in the `settings` table
+   instead, like the oversight switch; see ADR 0019.)
 3. Document it in the table in [operations.md](operations.md).
 
 ## Adding a text

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rom/gr_report/internal/i18n"
 	"github.com/rom/gr_report/internal/sandbox"
@@ -31,6 +32,7 @@ language: sv
 chat:
   enabled: false
   oversight: true
+  oversight_toggle: false
 sandbox: strict
 development:
   insecure_http: false
@@ -44,7 +46,7 @@ func TestConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Config{File: path, Addr: "127.0.0.1:9443", DataDir: "/srv/gr", TLSCert: "/etc/x/cert.pem", TLSKey: "/etc/x/key.pem",
-		Lang: i18n.SV, Chat: false, ChatOversight: true, Sandbox: sandbox.ModeStrict}
+		Lang: i18n.SV, Chat: false, ChatOversight: true, Sandbox: sandbox.ModeStrict, TimeZone: "UTC", BackupKeep: 10}
 	if cfg != want {
 		t.Errorf("config =\n%+v\nwant\n%+v", cfg, want)
 	}
@@ -77,6 +79,13 @@ func TestConfigPrecedence(t *testing.T) {
 	if cfg.Addr != ":7002" || cfg.Lang != i18n.SV || cfg.Chat || !cfg.ChatOversight || cfg.Sandbox != sandbox.ModeOff || cfg.DataDir != "/flag/data" {
 		t.Errorf("flags did not override the environment: %+v", cfg)
 	}
+	// The oversight switch can be locked from every source.
+	if c2, err := ParseConfig([]string{"-insecure-http", "-chat-oversight-toggle=false"}, env(nil), io.Discard); err != nil || c2.ChatOversightToggle {
+		t.Errorf("-chat-oversight-toggle=false: %+v, %v", c2, err)
+	}
+	if c2, err := ParseConfig([]string{"-insecure-http"}, env(map[string]string{"GR_REPORT_CHAT_OVERSIGHT_TOGGLE": "off"}), io.Discard); err != nil || c2.ChatOversightToggle {
+		t.Errorf("GR_REPORT_CHAT_OVERSIGHT_TOGGLE=off: %+v, %v", c2, err)
+	}
 	// -port replaces only the port, whatever the source of the address.
 	if cfg, err = ParseConfig([]string{"-config", path, "-port", "8000"}, env(nil), io.Discard); err != nil || cfg.Addr != "127.0.0.1:8000" {
 		t.Errorf("-port with file address: %+v, %v", cfg, err)
@@ -96,7 +105,7 @@ func TestConfigDefaultsAndRelativePaths(t *testing.T) {
 	for _, content := range []string{"", "# nothing here\n", "---\n", "tls:\n"} {
 		path := writeConfig(t, content)
 		cfg, err := ParseConfig([]string{"-config", path, "-insecure-http"}, env(nil), io.Discard)
-		if err != nil || cfg.Addr != ":8443" || cfg.DataDir != "./data" || !cfg.Chat || cfg.ChatOversight || cfg.Lang != i18n.EN || cfg.Sandbox != sandbox.ModeAuto {
+		if err != nil || cfg.Addr != ":8443" || cfg.DataDir != "./data" || !cfg.Chat || cfg.ChatOversight || !cfg.ChatOversightToggle || cfg.Lang != i18n.EN || cfg.Sandbox != sandbox.ModeAuto {
 			t.Errorf("content %q: %+v, %v", content, cfg, err)
 		}
 	}
@@ -173,7 +182,7 @@ func TestConfigYAMLRoundTrip(t *testing.T) {
 		t.Fatal(cfg, err)
 	}
 	out := cfg.YAML()
-	for _, want := range []string{`listen: 127.0.0.1:9443`, "data_dir: /srv/gr", "language: sv", "sandbox: strict", "oversight: true", "enabled: false", "insecure_http: false", "cert: /etc/x/cert.pem"} {
+	for _, want := range []string{`listen: 127.0.0.1:9443`, "data_dir: /srv/gr", "language: sv", "sandbox: strict", "oversight: true", "oversight_toggle: false", "enabled: false", "insecure_http: false", "cert: /etc/x/cert.pem"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("rendered configuration lacks %q:\n%s", want, out)
 		}
@@ -197,7 +206,8 @@ func TestShippedConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.Addr != ":8443" || cfg.DataDir != "/var/lib/gr_report" || cfg.TLSCert != "/etc/gr_report/tls/cert.pem" || cfg.TLSKey != "/etc/gr_report/tls/key.pem" ||
-		cfg.Sandbox != sandbox.ModeStrict || cfg.Lang != i18n.EN || !cfg.Chat || cfg.ChatOversight || cfg.InsecureHTTP || cfg.DevSeed {
+		cfg.Sandbox != sandbox.ModeStrict || cfg.Lang != i18n.EN || !cfg.Chat || cfg.ChatOversight || !cfg.ChatOversightToggle || cfg.InsecureHTTP || cfg.DevSeed ||
+		cfg.TimeZone != "UTC" || cfg.RedirectHTTP != "" || cfg.BackupInterval != time.Hour || cfg.BackupKeep != 24 {
 		t.Errorf("shipped configuration: %+v", cfg)
 	}
 	raw, err := os.ReadFile(path)
@@ -210,7 +220,8 @@ func TestShippedConfigFile(t *testing.T) {
 	}
 	// Every setting is present in the shipped file.
 	if fc.Listen == nil || fc.DataDir == nil || fc.Language == nil || fc.Sandbox == nil || fc.TLS.Cert == nil || fc.TLS.Key == nil ||
-		fc.Chat.Enabled == nil || fc.Chat.Oversight == nil || fc.Development.InsecureHTTP == nil || fc.Development.DemoAccounts == nil {
+		fc.Chat.Enabled == nil || fc.Chat.Oversight == nil || fc.Chat.OversightToggle == nil || fc.Development.InsecureHTTP == nil || fc.Development.DemoAccounts == nil ||
+		fc.TimeZone == nil || fc.RedirectHTTP == nil || fc.Backup.Interval == nil || fc.Backup.Keep == nil {
 		t.Errorf("a setting is missing from the shipped file: %+v", fc)
 	}
 }
@@ -246,4 +257,57 @@ func FuzzConfigFile(f *testing.F) {
 			t.Fatalf("round trip changed values: %q %q", *fc2.Listen, cfg.Addr)
 		}
 	})
+}
+
+func TestConfigNewSettings(t *testing.T) {
+	path := writeConfig(t, "timezone: Europe/Stockholm\nredirect_http: \":8080\"\nbackup:\n  interval: 30m\n  keep: 5\ntls:\n  cert: c\n  key: k\n")
+	cfg, err := ParseConfig([]string{"-config", path}, env(nil), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TimeZone != "Europe/Stockholm" || cfg.RedirectHTTP != ":8080" || cfg.BackupInterval != 30*time.Minute || cfg.BackupKeep != 5 {
+		t.Errorf("from file: %+v", cfg)
+	}
+	out := cfg.YAML()
+	for _, want := range []string{"timezone: Europe/Stockholm", `redirect_http: :8080`, "interval: 30m0s", "keep: 5"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered configuration lacks %q:\n%s", want, out)
+		}
+	}
+	if again, err := ParseConfig([]string{"-config", writeConfig(t, out)}, env(nil), io.Discard); err != nil || again.BackupInterval != cfg.BackupInterval || again.TimeZone != cfg.TimeZone {
+		t.Errorf("round trip: %+v, %v", again, err)
+	}
+	// Environment and flags override the file.
+	e := env(map[string]string{"GR_REPORT_TIMEZONE": "UTC", "GR_REPORT_BACKUP_INTERVAL": "2h", "GR_REPORT_BACKUP_KEEP": "7", "GR_REPORT_REDIRECT_HTTP": "127.0.0.1:8081"})
+	if cfg, err = ParseConfig([]string{"-config", path}, e, io.Discard); err != nil || cfg.TimeZone != "UTC" || cfg.BackupInterval != 2*time.Hour || cfg.BackupKeep != 7 || cfg.RedirectHTTP != "127.0.0.1:8081" {
+		t.Errorf("environment: %+v, %v", cfg, err)
+	}
+	if cfg, err = ParseConfig([]string{"-config", path, "-timezone", "Asia/Tokyo", "-backup-interval", "0", "-backup-keep", "3", "-redirect-http", ""}, e, io.Discard); err != nil ||
+		cfg.TimeZone != "Asia/Tokyo" || cfg.BackupInterval != 0 || cfg.BackupKeep != 3 || cfg.RedirectHTTP != "" {
+		t.Errorf("flags: %+v, %v", cfg, err)
+	}
+	tls := []string{"-tls-cert", "c", "-tls-key", "k"}
+	bad := [][]string{
+		append([]string{"-timezone", "Mars/Olympus"}, tls...),
+		append([]string{"-timezone", "Local"}, tls...),
+		append([]string{"-redirect-http", "nonsense"}, tls...),
+		append([]string{"-backup-interval", "soon"}, tls...),
+		append([]string{"-backup-interval", "5s"}, tls...),
+		append([]string{"-backup-interval", "-1h"}, tls...),
+		append([]string{"-backup-keep", "0"}, tls...),
+		append([]string{"-backup-keep", "5000"}, tls...),
+		{"-insecure-http", "-redirect-http", ":8080"},
+	}
+	for _, args := range bad {
+		if _, err := ParseConfig(args, env(nil), io.Discard); err == nil {
+			t.Errorf("ParseConfig(%q) accepted", args)
+		}
+	}
+	if _, err := ParseConfig(tls, env(map[string]string{"GR_REPORT_BACKUP_KEEP": "many"}), io.Discard); err == nil {
+		t.Error("non-numeric GR_REPORT_BACKUP_KEEP accepted")
+	}
+	// -backup needs only the data directory, not TLS.
+	if cfg, err = ParseConfig([]string{"-data", "/srv/gr", "-backup", "/tmp/x.db"}, env(nil), io.Discard); err != nil || cfg.BackupTo != "/tmp/x.db" || cfg.DataDir != "/srv/gr" {
+		t.Errorf("-backup: %+v, %v", cfg, err)
+	}
 }

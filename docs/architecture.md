@@ -235,10 +235,12 @@ sandbox layers are absent.
 | Item | Consequence | Possible remedy |
 | --- | --- | --- |
 | Queue views sort in memory | A view loads all matching rows before paging | Move sorting and `LIMIT` into SQL ([ADR 0012](adr/0012-sqlite-storage.md)) |
-| Sessions in memory | Restart logs users out | Persist sessions in the database |
+| Sessions in memory | Restart logs users out (drafts survive) | Persist sessions in the database |
 | New-report notice and chat by polling | Up to 30 s (notice) or 4 s (chat) delay; a request per open chat page every 4 s | Server-sent events |
 | No moderation of chat | Misuse can only be met by disabling an account or the chat; oversight (optional) only reads | Message removal by the leader |
 | Page script untested by automation | A regression shows up only in manual use | Browser test job in CI |
 | No screen-reader review | Markup checks cannot prove the experience | Manual audit with assistive technology |
-| Shared group accounts | No per-person audit trail | Personal accounts with group membership |
+| Shared group logins still allowed | No per-person trail for those who use them | Make personal accounts mandatory per group |
+| Backups on the same disk | Do not survive loss of the machine | Push copies to another host |
+| Live queue re-fetches the page | A request per open queue every 10 s | Server-sent events |
 | SELinux/AppArmor not exercised in CI | Policy errors show up at deployment | Add a VM-based test job |

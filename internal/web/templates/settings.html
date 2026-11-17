@@ -11,10 +11,25 @@
   <select id="theme" name="theme" aria-describedby="theme-help">
     {{range $d.Themes}}<option value="{{.Name}}"{{if eq .Name $.Theme}} selected{{end}}>{{$.Tr .Label}}</option>{{end}}
   </select>
+  <label for="tz">{{$.T "Time zone"}}</label>
+  <input type="text" id="tz" name="tz" value="{{$.Zone}}" list="zones" maxlength="64" autocomplete="off" spellcheck="false" aria-describedby="tz-help">
+  <datalist id="zones">{{range $d.Zones}}<option value="{{.}}">{{end}}</datalist>
+  <p class="help" id="tz-help">{{$.T "Times are shown in this time zone. Write a name such as Europe/Stockholm, or UTC."}}
+    <button type="button" class="link" id="tz-detect" data-js-show hidden>{{$.T "Use this device's time zone"}}</button></p>
   <p class="help" id="theme-help">{{$.T "System default follows the light, dark or increased contrast setting of your device. All themes meet the WCAG AA contrast requirement; High contrast meets AAA."}}</p>
   <div class="actions"><button>{{$.T "Save settings"}}</button>{{if not .User}} <a href="/login">{{$.T "Back to log in"}}</a>{{end}}</div>
   <p class="help">{{$.T "The settings are stored in this browser only, so everyone sharing a group account can choose their own."}}</p>
 </form>
+{{if and .User (ne .User.Role "admin")}}
+<section class="panel" aria-labelledby="h-notify" data-js-show hidden>
+  <h2 id="h-notify">{{$.T "Notifications"}}</h2>
+  <p class="help">{{$.T "Be told about new reports and chat messages while this site is open in a tab. The choice is stored in this browser."}}</p>
+  <label class="inline" for="notify-desktop"><input type="checkbox" id="notify-desktop"> {{$.T "Desktop notifications"}}</label>
+  <label class="inline" for="notify-sound"><input type="checkbox" id="notify-sound"> {{$.T "Sound"}}</label>
+  <div class="actions"><button type="button" class="plain" id="notify-test">{{$.T "Test"}}</button>
+    <span class="help" id="notify-status" role="status" data-denied="{{$.T "The browser does not allow notifications from this site. Change it in the browser's site settings."}}" data-unsupported="{{$.T "This browser has no desktop notifications."}}"></span></div>
+</section>
+{{end}}
 <h2 id="themes-heading">{{$.T "Themes"}}</h2>
 <ul class="swatches" aria-labelledby="themes-heading">
   {{range $d.Themes}}{{if ne .Name "auto"}}

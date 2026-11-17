@@ -1,5 +1,5 @@
 {{define "content"}}
-<h1>{{.User.DisplayName}}</h1>
+<h1>{{if $.Group}}{{$.Group}}{{else}}{{.User.DisplayName}}{{end}}</h1>
 <div class="cols">
 <section class="panel" aria-labelledby="h-write">
   <h2 id="h-write">{{$.T "Write a report"}}</h2>
@@ -12,17 +12,28 @@
     <div class="actions"><button>{{$.T "Start report"}}</button></div>
   </form>
   {{else}}<p class="muted">{{$.T "No report templates are available yet."}}</p>{{end}}
+  {{if .Data.Drafts}}
+  <h3 id="h-drafts">{{$.T "Your drafts"}}</h3>
+  <ul class="saved" aria-labelledby="h-drafts">
+  {{range .Data.Drafts}}
+    <li><a href="/reports/new?{{if .Draft.RequestID}}request={{.Draft.RequestID}}{{else}}template={{.Draft.TemplateID}}{{end}}">{{if .Draft.Subject}}{{.Draft.Subject}}{{else}}{{$.T "(no subject)"}}{{end}}</a>
+      <span class="help">{{.TemplateName}}{{if .RequestName}} · {{.RequestName}}{{end}} · {{$.T "saved %s" ($.TS .Draft.Updated)}}</span>
+      <form class="inlineform" method="post" action="/drafts/{{.Draft.ID}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="link" aria-label="{{$.T "Delete draft: %s" .Draft.Subject}}">{{$.T "Delete"}}</button></form></li>
+  {{end}}
+  </ul>
+  {{end}}
 </section>
 <section class="panel" aria-labelledby="h-requests">
   <h2 id="h-requests">{{$.T "Open requests from the exercise leader"}}</h2>
   {{if .Data.Requests}}
   <table aria-labelledby="h-requests">
-    <thead><tr><th scope="col">{{$.T "Received"}}</th><th scope="col">{{$.T "Subject"}}</th><th scope="col">{{$.T "Answered"}}</th><th scope="col"><span class="sr-only">{{$.T "Actions"}}</span></th></tr></thead>
+    <thead><tr><th scope="col">{{$.T "Received"}}</th><th scope="col">{{$.T "Subject"}}</th><th scope="col">{{$.T "Deadline"}}</th><th scope="col">{{$.T "Answered"}}</th><th scope="col"><span class="sr-only">{{$.T "Actions"}}</span></th></tr></thead>
     <tbody>
     {{range .Data.Requests}}
     <tr{{if not .Responses}} class="new"{{end}}>
-      <td>{{ts .Req.Created}}</td>
+      <td>{{$.TS .Req.Created}}</td>
       <td><a href="/requests/{{.Req.ID}}">{{.Req.Subject}}</a></td>
+      <td>{{if .Req.Due.IsZero}}<span class="muted">–</span>{{else}}{{$.TS .Req.Due}}{{if .Overdue}} <span class="tag new">{{$.T "overdue"}}</span>{{end}}{{end}}</td>
       <td>{{if .Responses}}{{$.T "yes"}} ({{.Responses}}){{else}}<span class="tag new">{{$.T "no"}}</span>{{end}}</td>
       <td><a href="/reports/new?request={{.Req.ID}}" aria-label="{{$.T "Answer: %s" .Req.Subject}}">{{$.T "Answer"}}</a></td>
     </tr>
@@ -38,7 +49,7 @@
   <thead><tr><th scope="col">{{$.T "Time"}}</th><th scope="col">{{$.T "Subject"}}</th><th scope="col">{{$.T "To"}}</th><th scope="col">{{$.T "Template"}}</th></tr></thead>
   <tbody>
   {{range .Data.Recent}}
-  <tr><td>{{ts .Timestamp}}</td><td><a href="/reports/{{.ID}}">{{.Subject}}</a></td><td>{{if eq .ReceiverID "leader"}}{{$.T "Exercise leader"}}{{else}}{{.ReceiverName}}{{end}}</td><td>{{.TemplateName}}</td></tr>
+  <tr><td>{{$.TS .Timestamp}}</td><td><a href="/reports/{{.ID}}">{{.Subject}}</a></td><td>{{if eq .ReceiverID "leader"}}{{$.T "Exercise leader"}}{{else}}{{.ReceiverName}}{{end}}</td><td>{{.TemplateName}}</td></tr>
   {{end}}
   </tbody>
 </table></div>

@@ -1,6 +1,7 @@
 # 0018 – One YAML configuration file for all settings
 
-* Status: Accepted
+* Status: Accepted; one setting, chat oversight, can also be changed in the
+  user interface since [0019](0019-oversight-switch.md)
 * Date: 2026-11-16
 * ASRs: Q-2, Q-7, Q-10
 
